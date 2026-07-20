@@ -42,6 +42,17 @@ const SHELL_ASSETS = [
   './static/favicon.svg',
   './static/favicon-32.png',
   './manifest.json',
+  // FRONTIR: reskin layer + brand assets (see FRONTIR-UI.md)
+  './static/frontir.css' + VQ,
+  './static/frontir.js' + VQ,
+  './static/frontir-icon.svg',
+  './static/frontir-icon-32.png',
+  './static/frontir-icon-192.png',
+  './static/frontir-shield.png',
+  './static/frontir-shield-ink.png',
+  './static/frontir-wordmark.png',
+  './static/frontir-wordmark-ink.png',
+  // /FRONTIR
 ];
 
 function deleteOldShellCaches() {
