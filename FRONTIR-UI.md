@@ -223,15 +223,14 @@ setting freezes the orb.
   look is approximated by *recoloring* rail + sidebar into one visual
   column instead of restructuring (course-corrected requirement; also the
   cheapest possible merge posture).
-- **`favicon.ico`** — the legacy `.ico` fallback still serves the Hermes
-  caduceus. Generating a proper multi-size `.ico` needs a real encoder;
-  virtually no modern browser reaches this fallback past the SVG/PNG
-  links. Revisit only if a real client shows the old icon.
-- **`static/login.js` / the login page template** (in `api/routes.py`) —
-  branding it means editing Python route strings; out of scope for a
-  static-layer reskin and a future decision.
-- **`share.html`** — read-only share view keeps stock styling (it doesn't
-  load the skin system).
+- ~~**`favicon.ico`**~~ — RESOLVED 2026-07-20, see §10.
+- ~~**`static/login.js` / the login page template**~~ — RESOLVED: the login
+  page in `api/routes.py` now carries inlined Nightwatch/Daywatch tokens
+  (it cannot use `frontir.css` — it renders before the skin system boots).
+- ~~**`share.html`**~~ — RESOLVED: its inline boot script already forwarded
+  an unrecognised skin to `dataset.skin` via `pendingExt`, so `frontir` was
+  being set all along with no stylesheet defining it. Adding the `<link>`
+  was the whole fix.
 - **i18n** — console copy is English-only; the upstream `t()` catalog was
   not extended, to avoid touching `i18n.js` (merge pain for ~30 strings).
 - **`assistantDisplayName` default** — wrapped, not edited (§6).
@@ -250,16 +249,72 @@ setting freezes the orb.
 - **Light-mode theme_color**: the PWA manifest allows only one
   `theme_color` (`#09090B`); iOS light-theme users see a dark status bar
   until boot.js re-syncs. Cosmetic, first-paint only.
-- **"Projects" section**: the target mock has a `Projects` header with an
-  empty state. Hermes has a project concept inside the session list
-  (project dots) but no dedicated sidebar section; inventing one would
-  duplicate upstream IA. Skipped pending a real product decision.
-- **Speaker button** stops current playback (`stopTTS`); it does not
-  persist a mute (that would silently fight the Settings → TTS toggle).
-  If a true mute is wanted, it should toggle `hermes-tts-enabled` +
-  `_applyTtsEnabled` — one-line change, needs a product call.
-- **`login` page and `share.html`** remain Hermes-branded (see §8).
+- ~~**"Projects" section**~~ — DECIDED 2026-07-20: ship it, as a *promotion
+  of the real thing*. Hermes already has a full project system (create /
+  rename / delete / colour, profile-scoped, `projects.json`, `/api/projects`)
+  rendered as `.project-bar` at the top of the session list. frontir.js adds
+  no state, no API calls and no handlers — it labels that bar (`role=group`,
+  `aria-label`, an `<h3>`) and frontir.css lays it out as the mock's vertical
+  section. Every upstream interaction survives; another skin restores the
+  stock chip row. The section appears with the first conversation (the bar
+  is absent only on a profile with no projects *and* no sessions), which is
+  also the first moment it could say anything true.
+- ~~**Speaker button**~~ — DECIDED 2026-07-20: a persistent mute, as asked.
+  **The note above was wrong about the mechanism and it matters.**
+  `hermes-tts-enabled` is not a mute: its entire effect is the
+  `body.tts-enabled` class, which CSS uses to *show* the per-message
+  read-aloud buttons. Wiring a mute to it would hide affordances and
+  silence nothing, and there is no other upstream mute preference — so the
+  layer owns `frontir-muted`.
+  Enforcement is a wrapper on `window.autoReadLastAssistant`, the single
+  entry to every speech path (messages.js calls it on stream completion;
+  boot.js overrides it so a live session routes into `_speakResponse()`).
+  Two consequences worth knowing:
+  - boot.js **restores the original** on voice deactivate, dropping the
+    wrapper — so it is re-asserted from the voice observer (idempotent).
+  - a live voice session is deliberately let through. boot.js only returns
+    the turn loop to listening from *inside* `_speakResponse()`, so
+    skipping it would park the session in `thinking` forever. Muting still
+    stops the utterance that is playing; ending the session stops voice.
+    Gating voice properly needs a boot.js patch — a separate call.
+- ~~**`login` page and `share.html`**~~ — both branded, see §8.
+- **Light-mode theme_color** remains the one open cosmetic item (above).
 - Console screenshots were verified against a static harness (real
   `style.css` + real markup slices + mocked JS surfaces) — dark, light,
-  mobile, and stock-skin-reversion all pass — but a live end-to-end pass
-  on the running gateway + an actual iOS PWA install is still worth doing.
+  mobile, and stock-skin-reversion all pass. Behaviour is now covered too:
+  `node tests/frontir_layer_harness.mjs` executes frontir.js against a
+  minimal DOM and asserts the Projects re-labelling (including across a
+  session-list re-render) and the whole mute contract, boot.js
+  clobber/re-wrap cycle included. A live end-to-end pass on the running
+  gateway + an actual iOS PWA install is still worth doing.
+
+## 10. Icon set (2026-07-20)
+
+Regenerated from the brand master by a traced-geometry pipeline rather than
+by resizing rasters. Four defects were found and fixed:
+
+| Was | Now |
+|---|---|
+| `frontir-icon.svg` was a 192px PNG inside an `<image>` tag, while `manifest.json` advertised it `sizes:"any"` — it claimed vector and was not | genuine vector: the shield alpha traced to 5 closed loops / 540 vertices, verified at **99.4% IoU** by re-rasterising the polygons and diffing against the source. 7.4KB, down from 21.7KB |
+| `favicon.ico` was the upstream Hermes caduceus, one 256px frame | Frontir mark, real multi-size **16/24/32/48/64/128/256** |
+| one icon declared `purpose:"any maskable"`, but the shape reaches **r=54.3%** of the canvas where Android's circular mask allows 40% — it was being clipped | `any` and `maskable` are separate assets; `frontir-icon-maskable-512.png` composes the mark to **r=38%** |
+| small sizes reused the large composition, so at 16px the mark resolved to grey mush | optical sizing on two axes: the mark grows (58.8% → 82% of canvas) *and* sheds its two finest shapes (triangle ≤20px, lens ≤24px) as size drops |
+
+`favicon-32.png`, `favicon-192.png`, `favicon-512.png`, `favicon.svg`,
+`favicon-512.svg` and `apple-touch-icon.png` are upstream *filenames* that
+are now rebranded in place. This is a deliberate departure from "upstream
+files left untouched": `messages.js` uses `favicon-192`/`favicon-32` as the
+push-notification icon and badge, so leaving them stock shipped the Hermes
+caduceus in every notification. Rebranding the files fixes that with no
+edit to `messages.js`. Binary conflicts on an upstream merge resolve as
+"always take ours".
+
+Also added: `frontir-icon-16.png`, `frontir-icon-180.png` (the size iOS
+actually rasterises the home-screen icon at — it had been downsampling the
+512 on every install), both linked from `index.html` and precached in
+`sw.js`.
+
+Regenerate with `python scripts/frontir/gen_icons.py` (pure PIL — no
+numpy/cv2 needed). `scripts/frontir/trace_shield.py` holds the tracer and
+prints the fidelity number; both are deterministic, so re-running produces
+byte-identical assets.
