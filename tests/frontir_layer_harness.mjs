@@ -145,6 +145,10 @@ global.window.registerHermesSkin = () => true;
 global.window.switchPanel = () => {};
 let voiceOn = false;
 global.window._voiceModeActive = () => voiceOn;
+/* ui.js's TTS text scrubber. boot.js's _speakResponse() resolves it through
+   the scope chain, so it is the one seam that can gate a live voice session
+   (see the note above guardStripForTTS). Stock behaviour is a passthrough. */
+global.window._stripForTTS = (t) => t;
 
 /* the two nodes the voice observer watches */
 const voiceBtn = new El('button'); voiceBtn.setAttribute('id', 'btnVoiceMode');
@@ -220,19 +224,46 @@ ok(store['hermes-tts-enabled'] === undefined, 'does NOT write the read-aloud-but
 global.window.autoReadLastAssistant();
 ok(spoke === 1, 'muted reply stays silent');
 
-// a live voice session is let through on purpose: skipping _speakResponse()
-// strands boot.js's turn loop in "thinking" (see the note in frontir.js)
+// A live voice session is still let through at THIS entry point on purpose:
+// blocking here skips boot.js's _speakResponse(), the only thing that returns
+// the turn loop to listening, stranding the session in "thinking".
 voiceOn = true;
 global.window.autoReadLastAssistant();
-ok(spoke === 2, 'live voice session still speaks while muted (documented exception)');
+ok(spoke === 2, 'voice session is not blocked at the autoRead entry point');
+
+// It is gated one level deeper instead. _speakResponse() is closure-local and
+// unwrappable, but it runs its text through the global _stripForTTS() and, on
+// an empty result, returns the loop to listening rather than speaking
+// (boot.js:1714). Model that bail exactly.
+let listening = 0;
+const speakResponse = () => {
+  const clean = global.window._stripForTTS('a reply');
+  if (!clean) { listening++; return; }           // boot.js:1714
+  spoke++;
+};
+const beforeMuted = spoke;
+speakResponse();
+ok(spoke === beforeMuted, 'muted voice session speaks nothing');
+ok(listening === 1, 'and the turn loop returns to listening, not stranded');
+
+store['frontir-muted'] = '0';
+speakResponse();
+ok(spoke === beforeMuted + 1, 'unmuted voice session speaks');
+ok(listening === 1, 'and takes no spurious listening transition');
+
+// the gate is scoped to live sessions: the read-aloud button's text must be
+// scrubbed normally when no session is running, muted or not
+store['frontir-muted'] = '1';
 voiceOn = false;
+ok(global.window._stripForTTS('hello') === 'hello', 'strip untouched outside a voice session');
 
 spk.click(); flush();
 ok(store['frontir-muted'] === '0', 'second click unmutes');
 ok(stopped === 1, 'unmuting does NOT call stopTTS');
 ok(spk.querySelector('.frontir-dock-label').textContent === 'Speaker', 'label back to Speaker');
+const beforeUnmuted = spoke;
 global.window.autoReadLastAssistant();
-ok(spoke === 3, 'unmuted speaks again');
+ok(spoke === beforeUnmuted + 1, 'unmuted speaks again');
 
 // boot.js restores the ORIGINAL function on voice deactivate, dropping our
 // wrapper with it. The voice observer must re-assert it.

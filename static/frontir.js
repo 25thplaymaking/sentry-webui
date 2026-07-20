@@ -347,6 +347,42 @@
     wrapped.__frontirMute=true;
     window.autoReadLastAssistant=wrapped;
   }
+  /* The voice-session half of the mute (2026-07-20).
+
+     guardAutoRead deliberately lets a live session through: boot.js routes
+     autoReadLastAssistant into its closure-local _speakResponse(), which is
+     the only thing that returns the turn loop to listening. Blocking there
+     would park the session in 'thinking' forever.
+
+     _speakResponse is a `function` declaration inside boot.js's IIFE — never
+     on window, so it cannot be wrapped. But it has one clean bail:
+
+         if(!clean){ _startListening(); return; }      // boot.js
+
+     where `clean` comes from _stripForTTS(), a plain top-level function in
+     ui.js that boot.js resolves through the scope chain. Returning '' from it
+     while muted therefore silences the utterance *and* advances the loop, via
+     boot.js's own path — no upstream patch, so the [data-skin] revert
+     contract holds.
+
+     ui.js's two other callers (the per-message read-aloud button and
+     autoReadLastAssistant) both `if(!clean) return;`, so they no-op too —
+     which is what a mute should do to them anyway. The guard is narrowed to
+     voiceActive() so an unmuted-path change is impossible when no session is
+     running.
+
+     Unlike autoReadLastAssistant, this global is never reassigned by boot.js,
+     so one install at init is enough; the marker keeps it idempotent.       */
+  function guardStripForTTS(){
+    var fn=window._stripForTTS;
+    if(typeof fn!=='function'||fn.__frontirMute) return;
+    var wrapped=function(){
+      if(muted()&&voiceActive()) return '';
+      return fn.apply(this,arguments);
+    };
+    wrapped.__frontirMute=true;
+    window._stripForTTS=wrapped;
+  }
   var speakerWasMuted=null;
   function syncSpeakerBtn(){
     if(!speakerBtn) return;
@@ -697,6 +733,7 @@
     injectSidebar();
     watchProjectBar();
     guardAutoRead();
+    guardStripForTTS();
     watchMutePreference();
     watchVoiceMode();
     /* keep the user chip in sync with profile changes (cheap observer)   */
