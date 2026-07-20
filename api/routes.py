@@ -9973,30 +9973,59 @@ _LOGIN_PAGE_HTML = """<!doctype html>
 <html lang="{{LANG}}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{{BOT_NAME}} — {{LOGIN_TITLE}}</title>
 <style>
+/* FRONTIR — login is the front door, so it carries the brand before anything
+   else loads. It cannot use frontir.css (the skin system is not booted here),
+   so the Nightwatch/Daywatch tokens are inlined. Values mirror
+   static/frontir.css; if those change, change these. Every id/class below is
+   load-bearing for login.js and is preserved verbatim. */
 *{box-sizing:border-box;margin:0;padding:0}
-body{background:#1a1a2e;color:#e8e8f0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
-  height:100vh;display:flex;align-items:center;justify-content:center}
-.card{background:#16213e;border:1px solid rgba(255,255,255,.08);border-radius:16px;padding:36px 32px;
-  width:320px;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,.3)}
-.logo{width:48px;height:48px;border-radius:12px;background:linear-gradient(145deg,#e8a030,#e94560);
-  display:flex;align-items:center;justify-content:center;font-weight:800;font-size:20px;color:#fff;
-  margin:0 auto 12px;box-shadow:0 2px 12px rgba(233,69,96,.3)}
-h1{font-size:18px;font-weight:600;margin-bottom:4px}
-.sub{font-size:12px;color:#8888aa;margin-bottom:24px}
-input{width:100%;padding:10px 14px;border-radius:10px;border:1px solid rgba(255,255,255,.1);
-  background:rgba(255,255,255,.04);color:#e8e8f0;font-size:14px;outline:none;margin-bottom:14px;
-  transition:border-color .15s}
-input:focus{border-color:rgba(124,185,255,.5);box-shadow:0 0 0 3px rgba(124,185,255,.1)}
-button{width:100%;padding:10px;border-radius:10px;border:none;background:rgba(124,185,255,.15);
-  border:1px solid rgba(124,185,255,.3);color:#7cb9ff;font-size:14px;font-weight:600;cursor:pointer;
-  transition:all .15s}
-button:hover{background:rgba(124,185,255,.25)}
-.oidc-login{display:block;margin-top:10px;padding:10px;border-radius:10px;text-decoration:none;
-  background:rgba(255,255,255,.04);border:1px solid rgba(111,214,164,.35);color:#6fd6a4;
-  font-size:14px;font-weight:600;cursor:pointer;transition:all .15s}
-.oidc-login:hover{background:rgba(111,214,164,.12)}
-.passkey-login{margin-top:10px;background:rgba(255,255,255,.04);border-color:rgba(232,160,48,.35);color:#e8a030}
-.err{color:#e94560;font-size:12px;margin-top:10px;display:none}
+:root{
+  --fs-canvas:#09090B; --fs-glass:rgba(22,22,27,.58); --fs-hair:rgba(255,255,255,.07);
+  --fs-hair-strong:rgba(255,255,255,.16); --fs-text:#F4F3EF; --fs-muted:#A3A3AB;
+  --fs-chrome:#E9E7E0; --fs-chrome-ink:#131316; --fs-shield:url("static/frontir-shield.png");
+  --fs-ease:cubic-bezier(.22,1,.36,1);
+}
+@media (prefers-color-scheme: light){
+  :root{
+    --fs-canvas:#F4F3EF; --fs-glass:rgba(255,255,255,.72); --fs-hair:rgba(20,20,24,.12);
+    --fs-hair-strong:rgba(20,20,24,.22); --fs-text:#1B1B1F; --fs-muted:#565660;
+    --fs-chrome:#22222A; --fs-chrome-ink:#F4F3EF; --fs-shield:url("static/frontir-shield-ink.png");
+  }
+}
+body{background:var(--fs-canvas);color:var(--fs-text);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
+  min-height:100vh;display:flex;align-items:center;justify-content:center;
+  padding:max(16px,env(safe-area-inset-top)) 16px max(16px,env(safe-area-inset-bottom))}
+.card{background:var(--fs-glass);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+  border:1px solid var(--fs-hair);border-radius:14px;padding:36px 32px;width:320px;max-width:100%;
+  text-align:center;box-shadow:0 18px 50px rgba(0,0,0,.55),0 2px 8px rgba(0,0,0,.4)}
+/* The shield is the mark; the initial stays in the DOM as a zero-size fallback
+   so the template placeholder keeps substituting and nothing 404s to nothing. */
+.logo{width:44px;height:44px;margin:0 auto 14px;font-size:0;color:transparent;
+  background:var(--fs-shield) center/contain no-repeat}
+h1{font-size:18px;font-weight:500;letter-spacing:-.01em;margin-bottom:4px}
+.sub{font-size:11px;font-weight:500;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--fs-muted);margin-bottom:24px}
+input{width:100%;padding:10px 14px;border-radius:10px;border:1px solid var(--fs-hair);
+  background:color-mix(in srgb,var(--fs-text) 4%,transparent);color:var(--fs-text);font-size:14px;
+  outline:none;margin-bottom:14px;transition:border-color .16s var(--fs-ease)}
+input:focus-visible{border-color:var(--fs-hair-strong);
+  box-shadow:0 0 0 3px color-mix(in srgb,var(--fs-text) 10%,transparent)}
+button{width:100%;padding:10px;border-radius:10px;border:1px solid transparent;
+  background:var(--fs-chrome);color:var(--fs-chrome-ink);font-size:14px;font-weight:600;
+  cursor:pointer;transition:opacity .16s var(--fs-ease)}
+button:hover{opacity:.88}
+button:focus-visible{outline:2px solid var(--fs-hair-strong);outline-offset:2px}
+/* Secondary routes are quiet: chrome stays monochrome, per the token contract. */
+.oidc-login,.passkey-login{display:block;width:100%;margin-top:10px;padding:10px;border-radius:10px;
+  text-decoration:none;background:transparent;border:1px solid var(--fs-hair-strong);
+  color:var(--fs-text);font-size:14px;font-weight:500;cursor:pointer;
+  transition:background .16s var(--fs-ease)}
+.oidc-login:hover,.passkey-login:hover{background:color-mix(in srgb,var(--fs-text) 6%,transparent)}
+.err{color:var(--fs-text);font-size:12px;margin-top:10px;display:none;
+  border-left:2px solid var(--fs-hair-strong);padding-left:8px;text-align:left}
+@media (prefers-reduced-motion: reduce){*{transition:none!important;animation:none!important}}
+@media (forced-colors: active){.card{border:1px solid CanvasText}.logo{forced-color-adjust:none}}
 </style></head><body>
 <div class="card">
   <div class="logo">{{BOT_NAME_INITIAL}}</div>
