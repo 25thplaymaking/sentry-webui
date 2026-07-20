@@ -1,25 +1,25 @@
 {
   "id": "./",
-  "name": "Hermes",
-  "short_name": "Hermes",
-  "description": "Hermes AI Agent Web UI",
+  "name": "Frontir Sentry",
+  "short_name": "Sentry",
+  "description": "Frontir Sentry — voice-first AI agent console",
   "start_url": "./?source=pwa",
   "scope": "./",
   "display": "standalone",
   "display_override": ["window-controls-overlay", "standalone", "minimal-ui"],
-  "background_color": "#0D0D1A",
-  "theme_color": "#0D0D1A",
+  "background_color": "#09090B",
+  "theme_color": "#09090B",
   "orientation": "portrait-primary",
   "categories": ["productivity", "utilities"],
   "shortcuts": [
     {
       "name": "New conversation",
       "short_name": "New chat",
-      "description": "Open Hermes ready for a new chat",
+      "description": "Open Sentry ready for a new chat",
       "url": "./?source=pwa&action=new-chat",
       "icons": [
         {
-          "src": "static/favicon-192.png",
+          "src": "static/frontir-icon-192.png",
           "sizes": "192x192",
           "type": "image/png"
         }
@@ -28,23 +28,23 @@
   ],
   "icons": [
     {
-      "src": "static/favicon.svg",
+      "src": "static/frontir-icon.svg",
       "sizes": "any",
       "type": "image/svg+xml",
       "purpose": "any maskable"
     },
     {
-      "src": "static/favicon-32.png",
+      "src": "static/frontir-icon-32.png",
       "sizes": "32x32",
       "type": "image/png"
     },
     {
-      "src": "static/favicon-192.png",
+      "src": "static/frontir-icon-192.png",
       "sizes": "192x192",
       "type": "image/png"
     },
     {
-      "src": "static/favicon-512.png",
+      "src": "static/frontir-icon-512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any maskable"
