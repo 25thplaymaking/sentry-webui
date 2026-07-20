@@ -11734,12 +11734,12 @@ _SHELL_ERROR_HTML = """<!doctype html>
 <head>
   <meta charset=\"utf-8\">
   <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">
-  <title>Hermes is restarting</title>
+  <title>Sentry is restarting</title>
 </head>
-<body style=\"margin:0;padding:2rem;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#111827;color:#e5e7eb;\">
+<body style=\"margin:0;padding:2rem;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#09090B;color:#F4F3EF;\">
   <main style=\"max-width:40rem;margin:10vh auto;line-height:1.5;\">
-    <h1 style=\"font-size:1.5rem;margin:0 0 0.75rem;\">Hermes is restarting…</h1>
-    <p style=\"margin:0;color:#cbd5e1;\">The WebUI shell could not load cleanly. Refresh in a moment if this page does not update automatically.</p>
+    <h1 style=\"font-size:1.5rem;margin:0 0 0.75rem;\">Sentry is restarting…</h1>
+    <p style=\"margin:0;color:#A3A3AB;\">The WebUI shell could not load cleanly. Refresh in a moment if this page does not update automatically.</p>
   </main>
 </body>
 </html>"""
@@ -11982,7 +11982,12 @@ def handle_get(handler, parsed) -> bool:
 
     if parsed.path == "/login":
         _settings = load_settings()
-        _bn = _html.escape(_settings.get("bot_name") or "Hermes")
+        # FRONTIR: fall back to the product name, not the upstream one. This is
+        # the <title> and the wordmark on the sign-in page — the first thing the
+        # desktop shell shows in its title bar before any session exists, so a
+        # stock default here reads as "Hermes" on the app window. A user-set
+        # bot_name still wins.
+        _bn = _html.escape(_settings.get("bot_name") or "Sentry")
         _lang = _settings.get("language", "en")
         _login_strings = _LOGIN_LOCALE[
             _resolve_login_locale_key(_lang)
