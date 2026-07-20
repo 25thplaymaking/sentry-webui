@@ -8,10 +8,14 @@
      MUST appear before manifest/favicon links so browsers resolve relative URLs against the
      correct base when the page is served from /session/<id> routes. See #2226. -->
 <script>(function(){var path=location.pathname,marker='/session/',i=path.indexOf(marker),p;i>=0?p=(path.slice(0,i+1)||'/'):p=(path.endsWith('/')?path:(path.replace(/\/[^\/]*$/,'/')||'/'));document.write('<base href="'+location.origin+p+'">');})()</script>
-<!-- FRONTIR: favicon hrefs point at Frontir shield assets (upstream favicon.* files left untouched;
-     the legacy .ico fallback line below is intentionally NOT rebranded — see FRONTIR-UI.md). -->
+<!-- FRONTIR: Frontir shield icon set. frontir-icon.svg is now genuine vector
+     geometry (traced from the brand master, 99.4% IoU) rather than a PNG in an
+     <image> tag, so it stays crisp at every install size. favicon.ico is a real
+     multi-size file (16/24/32/48/64/128/256) with the mark optically scaled and
+     its finest detail dropped below 32px — see FRONTIR-UI.md §10. -->
 <link rel="icon" type="image/svg+xml" href="static/frontir-icon.svg">
 <link rel="icon" type="image/png" sizes="32x32" href="static/frontir-icon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="static/frontir-icon-16.png">
 <link rel="shortcut icon" href="static/favicon.ico">
 <!-- /FRONTIR -->
 
@@ -21,6 +25,10 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <!-- FRONTIR: home-screen identity -->
 <meta name="apple-mobile-web-app-title" content="Sentry">
+<!-- 180x180 is the size iOS actually rasterises the home-screen icon at; it was
+     downsampling the 512 on every install. The 512 stays as the fallback for
+     anything that asks for the largest available. -->
+<link rel="apple-touch-icon" sizes="180x180" href="static/frontir-icon-180.png">
 <link rel="apple-touch-icon" sizes="512x512" href="static/frontir-icon-512.png">
 <!-- /FRONTIR -->
 <!-- FRONTIR: first-run default skin. Runs BEFORE the stock skin-normalization script below,
