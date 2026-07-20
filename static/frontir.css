@@ -317,6 +317,63 @@
 .frontir-user-name:focus-visible,.frontir-user-gear:focus-visible{
   outline:2px solid var(--fs-focus);outline-offset:2px;
 }
+/* ── Projects: upstream's .project-bar promoted to a titled section ────
+   frontir.js only *labels* the real bar (see its §3b note); this lays it
+   out as the target mock's vertical sidebar section. No behaviour is
+   changed — these are still upstream's chips with upstream's handlers, so
+   create / rename / delete / long-press / filtering all keep working, and
+   any other skin gets the stock horizontal chip row back untouched.      */
+.frontir-projects-head{display:none;}
+:root[data-skin="frontir"] .frontir-projects-head{
+  display:block;margin:0 0 6px;padding:0 8px;
+  font-size:var(--fs-size-caps);font-weight:500;
+  letter-spacing:var(--fs-track-caps);text-transform:uppercase;
+  color:var(--fs-text-3);
+}
+:root[data-skin="frontir"] #sessionList .project-bar{
+  display:flex;flex-direction:column;align-items:stretch;
+  flex-wrap:nowrap;gap:1px;
+  padding:var(--fs-sp-3) var(--fs-sp-2);margin-bottom:var(--fs-sp-2);
+  border-bottom:1px solid var(--fs-line);
+}
+:root[data-skin="frontir"] #sessionList .project-chip{
+  width:100%;justify-content:flex-start;gap:8px;
+  padding:6px 8px;border:1px solid transparent;border-radius:var(--fs-r-btn);
+  background:none;color:var(--fs-text-2);
+  font:450 var(--fs-size-body)/1.3 var(--fs-font-ui);
+  letter-spacing:0;text-transform:none;
+}
+/* long project names truncate rather than clipping mid-glyph             */
+:root[data-skin="frontir"] #sessionList .project-chip>span:last-child{
+  min-width:0;overflow:hidden;text-overflow:ellipsis;
+}
+:root[data-skin="frontir"] #sessionList .project-chip:hover{
+  background:var(--hover-bg);color:var(--fs-text);
+}
+/* selected project matches the active session row exactly — one visual
+   language for "this is what the list is showing".                       */
+:root[data-skin="frontir"] #sessionList .project-chip.active{
+  background:var(--fs-bg-raised);color:var(--fs-text);border-color:transparent;
+  box-shadow:inset 0 0 0 1px var(--fs-line-strong),0 1px 3px rgba(0,0,0,.2);
+}
+/* the colour dot is the one place a project's own hue may show, against
+   otherwise monochrome chrome.                                           */
+:root[data-skin="frontir"] #sessionList .project-chip .color-dot{
+  width:7px;height:7px;border-radius:50%;flex-shrink:0;
+}
+/* "+" becomes the section's trailing "New project" row — the standard
+   sidebar-section affordance instead of a stray glyph after the chips.
+   It is replaced in place by upstream's input, which keeps its own width. */
+:root[data-skin="frontir"] #sessionList .project-create-btn{
+  width:100%;text-align:left;padding:6px 8px;margin-top:2px;
+  border:none;border-radius:var(--fs-r-btn);background:none;
+  color:var(--fs-text-3);font:450 var(--fs-size-body)/1.3 var(--fs-font-ui);
+}
+:root[data-skin="frontir"] #sessionList .project-create-btn::after{content:" New project";}
+:root[data-skin="frontir"] #sessionList .project-create-btn:hover{
+  background:var(--hover-bg);color:var(--fs-text);
+}
+
 /* Mobile sidebar: panel views sit right of the absolute 52px mini-rail
    (style.css @media max-width:640px) — injected rows follow suit.        */
 @media (max-width:640px){
@@ -573,6 +630,18 @@
 .frontir-dock-btn--primary.is-live .frontir-dock-circle{
   background:color-mix(in srgb,var(--fs-live-listen) 24%,var(--fs-bg-raised));
   border-color:var(--fs-live-listen);color:var(--fs-text);
+}
+/* Speaker mute. aria-pressed="true" means MUTED on this button, so the
+   shared pressed-state accent fill above must NOT apply — a muted control
+   has to read as suppressed, not as lit/active. The extra attribute in the
+   selector puts it a specificity step above that rule rather than relying
+   on source order.                                                        */
+.frontir-dock-btn.is-muted{color:var(--fs-text-3);}
+.frontir-dock-btn.is-muted[aria-pressed="true"] .frontir-dock-circle{
+  background:var(--fs-glass);border-color:var(--fs-line);color:var(--fs-text-3);
+}
+.frontir-dock-btn.is-muted:hover[aria-pressed="true"] .frontir-dock-circle{
+  border-color:var(--fs-line-strong);color:var(--fs-text-2);
 }
 .frontir-dock-btn:disabled{opacity:.45;cursor:not-allowed;}
 .frontir-dock-wordmark{

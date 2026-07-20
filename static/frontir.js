@@ -48,6 +48,10 @@
     transcript:'<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path d="M8 9h8"/><path d="M8 13h5"/>',
     mic:'<rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0"/><line x1="12" y1="19" x2="12" y2="22"/>',
     speaker:'<polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9.5 9.5 0 0 1 0 13"/>',
+    /* muted = same cone with the arcs replaced by a cross, the conventional
+       "speaker off" glyph. Same stroke weight/box as `speaker` so swapping
+       between them does not shift the icon's optical centre.              */
+    speakerOff:'<polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="16" y1="9.5" x2="22" y2="15.5"/><line x1="22" y1="9.5" x2="16" y2="15.5"/>',
     gear:'<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82V15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
     close:'<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>'
   };
@@ -183,10 +187,52 @@
     if(avatar) avatar.textContent=(label.charAt(0)||'S').toUpperCase();
   }
 
+  /* ── 3b. Projects section (product decision, 2026-07-20) ──────────────
+     The target mock has a "Projects" sidebar section. Hermes already has a
+     complete project system — create / rename / delete / colour, profile
+     scoped, persisted in projects.json, and rendered as `.project-bar` at
+     the top of the session list, where selecting one filters the list.
+
+     So this ships the section as a *promotion of the real thing*, not a
+     second one: no project state, no API calls and no click handlers are
+     added here. We only name the existing bar; frontir.css lays it out as
+     a titled vertical section. Every upstream interaction survives intact
+     — double-click rename, right-click / long-press menu, "+" create,
+     quick-assign, profile scoping — and any other skin restores the stock
+     horizontal chip row exactly.
+
+     The bar is absent only when a profile has no projects AND no
+     conversations at all, i.e. a fresh install; the section therefore
+     appears with the first conversation, which is also the first moment it
+     could say anything true. That is deliberate — an always-present empty
+     "Projects" header on an empty install is chrome, not information.    */
+  function enrichProjectBar(){
+    var bar=doc.querySelector('#sessionList .project-bar');
+    if(!bar||bar.dataset.frontirProjects) return;
+    bar.dataset.frontirProjects='1';
+    bar.setAttribute('role','group');
+    bar.setAttribute('aria-label','Projects');
+    /* aria-hidden: the group above already carries the name, so exposing
+       the heading too would announce "Projects" twice.                    */
+    var head=el('h3','frontir-projects-head','Projects');
+    head.setAttribute('aria-hidden','true');
+    bar.insertBefore(head,bar.firstChild);
+  }
+  function watchProjectBar(){
+    var list=byId('sessionList');
+    if(!list) return;
+    enrichProjectBar();
+    /* renderSessionList() rebuilds the bar from scratch on every render, so
+       re-label each new one. childList (not subtree) on purpose: our own
+       insertBefore lands inside .project-bar and so cannot re-trigger this
+       observer.                                                           */
+    try{ new MutationObserver(enrichProjectBar).observe(list,{childList:true}); }catch(_){}
+  }
+
   /* ── 4. Voice console ───────────────────────────────────────────────── */
   var console_=null, orbBtn=null, stateWord=null, stateHint=null,
       statusText=null, startBtn=null, startLabel=null, widgetsBtn=null,
-      lastFocus=null, refreshTimer=null;
+      speakerBtn=null, lastFocus=null, refreshTimer=null;
 
   var cardDefs={
     context:{
@@ -253,6 +299,75 @@
     b.appendChild(circle);
     b.appendChild(el('span','frontir-dock-label',label));
     return b;
+  }
+
+  /* ── Speaker = a persistent mute (product decision, 2026-07-20) ───────
+     Previously this stopped the current utterance only, so the next reply
+     spoke again — not what a speaker glyph means anywhere else.
+
+     It deliberately does NOT drive `hermes-tts-enabled`, despite that
+     looking like the obvious preference to share with Settings. That key's
+     entire effect is the `body.tts-enabled` class, which CSS uses to SHOW
+     the per-message read-aloud buttons (`.msg-tts-btn`). It gates an
+     affordance, not audio — a mute wired to it would hide buttons and
+     still silence nothing. Hermes has no mute preference, so we own one.
+
+     Enforcement point: window.autoReadLastAssistant is the single entry to
+     every speech path — messages.js calls it on stream completion, and
+     boot.js overrides it so a live voice session routes into
+     _speakResponse(). Wrapping it (the §6 pattern) gates speech with no
+     upstream patch.
+
+     Deliberate exception — a live voice session is let through. boot.js
+     only returns the turn loop to listening from *inside* _speakResponse(),
+     so skipping it would park the session in 'thinking' forever. Muting
+     still stops the utterance that is playing; ending the session is what
+     stops voice. Documented in FRONTIR-UI.md §9.                          */
+  var MUTE_KEY='frontir-muted';
+  function muted(){
+    try{ return localStorage.getItem(MUTE_KEY)==='1'; }catch(_){ return false; }
+  }
+  function setMuted(on){
+    try{ localStorage.setItem(MUTE_KEY,on?'1':'0'); }catch(_){}
+    /* a mute that lets the current sentence finish reads as a dead button */
+    if(on){ try{ if(typeof window.stopTTS==='function') window.stopTTS(); }catch(_){} }
+    syncSpeakerBtn();
+  }
+  /* boot.js swaps window.autoReadLastAssistant in on voice activate and
+     restores the original on deactivate — which drops our wrapper with it.
+     Re-assert idempotently from the voice observer instead of patching
+     boot.js; the marker makes repeat calls free.                          */
+  function guardAutoRead(){
+    var fn=window.autoReadLastAssistant;
+    if(typeof fn!=='function'||fn.__frontirMute) return;
+    var wrapped=function(){
+      if(muted()&&!voiceActive()) return;
+      return fn.apply(this,arguments);
+    };
+    wrapped.__frontirMute=true;
+    window.autoReadLastAssistant=wrapped;
+  }
+  var speakerWasMuted=null;
+  function syncSpeakerBtn(){
+    if(!speakerBtn) return;
+    var m=muted();
+    if(speakerWasMuted===m) return;
+    speakerWasMuted=m;
+    speakerBtn.classList.toggle('is-muted',m);
+    speakerBtn.setAttribute('aria-pressed',m?'true':'false');
+    var label=speakerBtn.querySelector('.frontir-dock-label');
+    if(label) label.textContent=m?'Muted':'Speaker';
+    var circle=speakerBtn.querySelector('.frontir-dock-circle');
+    if(circle){
+      circle.textContent='';
+      circle.appendChild(svgIcon(m?ICO.speakerOff:ICO.speaker,17));
+    }
+  }
+  /* a second tab toggling the same preference */
+  function watchMutePreference(){
+    window.addEventListener('storage',function(e){
+      if(!e||e.key===MUTE_KEY||e.key===null) syncSpeakerBtn();
+    });
   }
 
   function buildConsole(){
@@ -334,10 +449,12 @@
     startBtn=dockBtn('Start session',ICO.mic,{primary:true,aria:'Start voice session'});
     startLabel=startBtn.querySelector('.frontir-dock-label');
     startBtn.addEventListener('click',toggleSession);
-    var speakerBtn=dockBtn('Speaker',ICO.speaker,{aria:'Stop speech playback'});
-    speakerBtn.addEventListener('click',function(){
-      try{ if(typeof window.stopTTS==='function') window.stopTTS(); }catch(_){}
-    });
+    speakerBtn=dockBtn('Speaker',ICO.speaker,{aria:'Mute speaker'});
+    /* Toggle-button pattern: the accessible name stays the action ("Mute
+       speaker") while aria-pressed carries the state; the visible label
+       flips Speaker/Muted so the state is legible without a screen reader. */
+    speakerBtn.setAttribute('aria-pressed','false');
+    speakerBtn.addEventListener('click',function(){ setMuted(!muted()); });
     var settingsBtn=dockBtn('Settings',ICO.gear,{aria:'Open settings'});
     settingsBtn.addEventListener('click',function(){
       closeConsole();
@@ -391,6 +508,7 @@
     refreshAvailability();
     refreshState();
     refreshCards();
+    syncSpeakerBtn();
     markNavActive(navVoiceBtn);
     if(orbBtn) orbBtn.focus({preventScroll:true});
     if(refreshTimer) clearInterval(refreshTimer);
@@ -470,6 +588,9 @@
     var modeBtn=byId('btnVoiceMode');
     var mo=new MutationObserver(function(){
       refreshState();
+      /* boot.js installs/restores its autoReadLastAssistant override on
+         exactly these transitions, so re-assert the mute wrapper here.   */
+      guardAutoRead();
       /* auto-surface the console when a session starts under this skin   */
       if(skinActive()&&voiceActive()&&(!console_||console_.hidden)) openConsole();
     });
@@ -574,6 +695,9 @@
     registerSkin();
     rebrandAssistantName();
     injectSidebar();
+    watchProjectBar();
+    guardAutoRead();
+    watchMutePreference();
     watchVoiceMode();
     /* keep the user chip in sync with profile changes (cheap observer)   */
     var chipSrc=byId('profileChipLabel');
