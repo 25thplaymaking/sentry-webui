@@ -59,6 +59,6 @@ def test_home_route_internal_error_returns_html_503_not_json(monkeypatch):
     assert handler.header("Cache-Control") == "no-store"
 
     body = bytes(handler.body).decode("utf-8")
-    assert "Hermes is restarting" in body
+    assert "Sentry is restarting" in body  # FRONTIR: rebranded shell copy
     assert "application/json" not in (handler.header("Content-Type") or "")
     assert '"error"' not in body

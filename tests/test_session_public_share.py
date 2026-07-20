@@ -132,7 +132,7 @@ def test_share_revoke_endpoint_hides_share_token_from_session():
 def test_share_page_serves_public_html():
     body, status, _ = get("/share/example-token")
     assert status == 200
-    assert "Hermes Shared Conversation" in body
+    assert "Shared Conversation — Frontir Sentry" in body  # FRONTIR: rebranded title
     assert "static/share.js" in body
 
 
