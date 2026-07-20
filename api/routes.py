@@ -11982,12 +11982,11 @@ def handle_get(handler, parsed) -> bool:
 
     if parsed.path == "/login":
         _settings = load_settings()
-        # FRONTIR: fall back to the product name, not the upstream one. This is
-        # the <title> and the wordmark on the sign-in page — the first thing the
-        # desktop shell shows in its title bar before any session exists, so a
-        # stock default here reads as "Hermes" on the app window. A user-set
-        # bot_name still wins.
-        _bn = _html.escape(_settings.get("bot_name") or "Sentry")
+        # The product name on this page comes from settings.bot_name, whose
+        # default is os.getenv("HERMES_WEBUI_BOT_NAME", "Hermes") — so the
+        # deployment sets HERMES_WEBUI_BOT_NAME rather than this line carrying
+        # a fork-specific fallback that could never fire.
+        _bn = _html.escape(_settings.get("bot_name") or "Hermes")
         _lang = _settings.get("language", "en")
         _login_strings = _LOGIN_LOCALE[
             _resolve_login_locale_key(_lang)
