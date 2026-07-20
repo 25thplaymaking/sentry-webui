@@ -272,11 +272,25 @@ setting freezes the orb.
   Two consequences worth knowing:
   - boot.js **restores the original** on voice deactivate, dropping the
     wrapper — so it is re-asserted from the voice observer (idempotent).
-  - a live voice session is deliberately let through. boot.js only returns
-    the turn loop to listening from *inside* `_speakResponse()`, so
-    skipping it would park the session in `thinking` forever. Muting still
-    stops the utterance that is playing; ending the session stops voice.
-    Gating voice properly needs a boot.js patch — a separate call.
+  - a live voice session is let through *at this entry point*, and gated one
+    level deeper instead. Blocking here would skip `_speakResponse()` — the
+    only thing that returns the turn loop to listening — parking the session
+    in `thinking` forever. `_speakResponse` is a `function` declaration
+    inside boot.js's IIFE and never reaches `window`, so it cannot be
+    wrapped; but it runs its text through `_stripForTTS()`, a plain
+    top-level function in ui.js that boot.js resolves through the shared
+    script scope, and bails on an empty result:
+    `if(!clean){ _startListening(); return; }`. Returning `''` from that
+    global while muted therefore silences the utterance *and* advances the
+    loop, along boot.js's own path — **no boot.js patch needed**, so the
+    skin-revert contract holds. Scoped to `voiceActive()` so the non-voice
+    paths are untouched outside a session. (Superseded the earlier note that
+    this required an upstream patch — 2026-07-20.)
+  - **not covered**: on non-default TTS engines (edge/elevenlabs/openai),
+    muting *mid*-utterance calls `stopTTS()` → `audio.pause()`, which never
+    fires `onended`, stranding the loop in `speaking`. Pre-existing and
+    unreachable on the default `browser` engine, where
+    `speechSynthesis.cancel()` does fire `onend`.
 - ~~**`login` page and `share.html`**~~ — both branded, see §8.
 - **Light-mode theme_color** remains the one open cosmetic item (above).
 - Console screenshots were verified against a static harness (real
