@@ -535,13 +535,46 @@ def get_oidc_startup_warning() -> str | None:
     )
 
 
+def is_sentry_auth_enabled() -> bool:
+    """True when this deployment runs the Sentry gateway dialect.
+
+    In that mode identity comes from a per-user Gateway enrollment token bound
+    to a profile, not from a shared password -- so the dialect is itself an
+    authentication method and MUST be counted by is_auth_enabled(). Without
+    this, dropping HERMES_WEBUI_PASSWORD to force per-user login would turn
+    authentication off entirely and serve the portal to anyone.
+    """
+    try:
+        from api.gateway_chat import _gateway_dialect
+
+        return _gateway_dialect() == "sentry"
+    except Exception:
+        return False
+
+
+def password_login_allowed() -> bool:
+    """False under the sentry dialect, so enrollment is the only door.
+
+    A shared-password session carries no profile identity: it would sign in
+    successfully and then 401 on every Gateway call, which is more confusing
+    than being turned away. Set HERMES_WEBUI_SENTRY_ALLOW_PASSWORD=1 to restore
+    password login (recovery hatch for a misprovisioned team).
+    """
+    if not is_sentry_auth_enabled():
+        return True
+    raw = os.getenv('HERMES_WEBUI_SENTRY_ALLOW_PASSWORD', '').strip().lower()
+    return raw in ('1', 'true', 'yes', 'on')
+
+
 def is_auth_enabled() -> bool:
-    """True if password auth, passkeys, OIDC login, or trusted-header auth is configured."""
+    """True if password auth, passkeys, OIDC login, trusted-header auth, or the
+    Sentry per-user enrollment dialect is configured."""
     return (
         is_password_auth_enabled()
         or are_passkeys_enabled()
         or is_oidc_auth_enabled()
         or is_trusted_auth_enabled()
+        or is_sentry_auth_enabled()
     )
 
 

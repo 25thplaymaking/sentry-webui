@@ -10033,7 +10033,7 @@ button:focus-visible{outline:2px solid var(--fs-hair-strong);outline-offset:2px}
   <p class="sub">{{LOGIN_SUBTITLE}}</p>
   <form id="login-form" data-invalid-pw="{{LOGIN_INVALID_PW}}" data-conn-failed="{{LOGIN_CONN_FAILED}}">
     {{SENTRY_ENROLL_HTML}}
-    <input type="password" id="pw" placeholder="{{LOGIN_PLACEHOLDER}}" autofocus>
+    {{PASSWORD_INPUT_HTML}}
     <button type="submit">{{LOGIN_BTN}}</button>
     <button type="button" id="passkey-login" class="passkey-login" style="display:none">Sign in with passkey</button>
     {{OIDC_LOGIN_HTML}}
@@ -10100,7 +10100,10 @@ def _request_base_url(handler) -> str:
 def _sentry_enroll_html() -> str:
     """Enrollment-code input for the login form, shown only when the deployment
     runs the sentry gateway dialect (per-user login). Empty otherwise, so
-    shared-password deployments render exactly as before."""
+    shared-password deployments render exactly as before.
+
+    Takes the autofocus when password sign-in is refused, because then this is
+    the only input on the page."""
     try:
         from api.gateway_chat import _gateway_dialect
 
@@ -10108,11 +10111,34 @@ def _sentry_enroll_html() -> str:
             return ""
     except Exception:
         return ""
+    autofocus = "" if _password_login_allowed() else " autofocus"
     return (
         '<input type="text" id="enroll-code" '
         'placeholder="Enrollment code (first sign-in)" '
-        'autocomplete="off" spellcheck="false">'
+        f'autocomplete="off" spellcheck="false"{autofocus}>'
     )
+
+
+def _password_login_allowed() -> bool:
+    """Never raises: a failure here must not blank the login form."""
+    try:
+        from api.auth import password_login_allowed
+
+        return password_login_allowed()
+    except Exception:
+        return True
+
+
+def _login_password_html() -> str:
+    """The shared-password input, dropped when password sign-in is refused.
+
+    Rendering a password box that is guaranteed to be rejected is a trap, so
+    under the sentry dialect the enrollment code becomes the only door. The
+    returned snippet keeps ``{{LOGIN_PLACEHOLDER}}`` unresolved — it is
+    substituted into the page before that token is replaced."""
+    if not _password_login_allowed():
+        return ""
+    return '<input type="password" id="pw" placeholder="{{LOGIN_PLACEHOLDER}}" autofocus>'
 
 
 def _oidc_login_html(parsed) -> str:
@@ -12014,7 +12040,10 @@ def handle_get(handler, parsed) -> bool:
         from api.updates import WEBUI_VERSION
         version_token = quote(WEBUI_VERSION, safe="")
         _page = (
-            _LOGIN_PAGE_HTML.replace("{{BOT_NAME}}", _bn)
+            # Must precede {{LOGIN_PLACEHOLDER}} below: the snippet this injects
+            # still carries that token.
+            _LOGIN_PAGE_HTML.replace("{{PASSWORD_INPUT_HTML}}", _login_password_html())
+            .replace("{{BOT_NAME}}", _bn)
             .replace("{{BOT_NAME_INITIAL}}", _bn[0].upper())
             .replace("{{WEBUI_VERSION}}", version_token)
             .replace("{{LANG}}", _html.escape(_login_strings["lang"]))
@@ -16440,6 +16469,19 @@ def handle_post(handler, parsed) -> bool:
                 handler.end_headers()
                 handler.wfile.write(enroll_resp)
                 return True
+        # Sentry dialect: the shared password is not an identity. A session
+        # minted from it carries no profile, so it would sign in and then 401 on
+        # every Gateway call. Refuse it outright — enrollment is the only door.
+        from api.auth import password_login_allowed
+
+        if not password_login_allowed():
+            _record_login_attempt(client_ip)
+            return bad(
+                handler,
+                "Password sign-in is disabled on this deployment. "
+                "Use your enrollment code to sign in.",
+                403,
+            )
         password = body.get("password", "")
         if not verify_password(password):
             _record_login_attempt(client_ip)

@@ -7,7 +7,9 @@ document.addEventListener('DOMContentLoaded', function () {
   var input = document.getElementById('pw');
   var passkeyBtn = document.getElementById('passkey-login');
 
-  if (!form || !input) return;
+  // `input` is absent when password sign-in is disabled (Sentry per-user
+  // enrollment is then the only door), so only the form itself is required.
+  if (!form) return;
 
   var invalidPw = form.getAttribute('data-invalid-pw') || 'Invalid password';
   var connFailed = form.getAttribute('data-conn-failed') || 'Connection failed';
@@ -59,7 +61,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
   async function doLogin(e) {
     e.preventDefault();
-    var pw = input.value;
+    var pw = input ? input.value : '';
     hideErr();
     // Sentry multi-user login: if an enrollment-code field is present and
     // filled, send it so the server redeems a per-user Gateway token. The
@@ -157,11 +159,15 @@ document.addEventListener('DOMContentLoaded', function () {
     passkeyBtn.addEventListener('click', doPasskeyLogin);
   }
 
-  input.addEventListener('keydown', function (e) {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      doLogin(e);
-    }
+  // Enter-to-submit on whichever field the page actually rendered.
+  [input, document.getElementById('enroll-code')].forEach(function (el) {
+    if (!el) return;
+    el.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        doLogin(e);
+      }
+    });
   });
 
   // On page load, probe the server so we can distinguish "can't reach server"
