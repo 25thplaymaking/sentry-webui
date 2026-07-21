@@ -13,7 +13,6 @@ must be tested rather than observed.
 """
 
 import io
-import json
 from types import SimpleNamespace
 
 import api.auth as auth

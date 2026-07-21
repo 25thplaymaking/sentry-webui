@@ -17,7 +17,6 @@ data, presenting one context's contents as if they were the signed-in user's.
 """
 
 import io
-import json
 import queue
 from types import SimpleNamespace
 
