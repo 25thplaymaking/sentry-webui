@@ -21951,6 +21951,14 @@ def _handle_chat_start(handler, body, diag=None):
             require(body, "session_id")
         except ValueError as e:
             return bad(handler, str(e))
+        # Sentry dialect: register this user's per-user Gateway token (from the
+        # auth cookie) for the chat session so the worker routes the turn as them.
+        # No-op unless dialect=sentry; never raises into the request path.
+        try:
+            from api.gateway_chat import _resolve_sentry_token_for_request
+            _resolve_sentry_token_for_request(handler, body["session_id"])
+        except Exception:
+            logger.debug("sentry token resolve failed", exc_info=True)
         # Reject a stale local Agent runtime before materialising, claiming, or
         # mutating any session state. Gateway-backed turns run in the gateway's
         # process and do not depend on this WebUI process's imported checkout.

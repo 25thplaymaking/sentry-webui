@@ -96,3 +96,37 @@ class TestStreaming:
                 'data: {"type":"error","summary":"boom"}',
                 'data: [DONE]',
             ])
+
+
+class _FakeHeaders:
+    def __init__(self, cookie):
+        self._c = cookie
+
+    def get(self, key, default=""):
+        return self._c if key == "Cookie" else default
+
+
+class _FakeHandler:
+    def __init__(self, cookie):
+        self.headers = _FakeHeaders(cookie)
+
+
+class TestSessionToken:
+    def test_set_get_roundtrip(self):
+        gc.set_sentry_session_token("s1", "tok")
+        assert gc.get_sentry_session_token("s1") == "tok"
+        gc.set_sentry_session_token("s1", None)
+        assert gc.get_sentry_session_token("s1") is None
+
+    def test_resolve_lifts_user_token_from_cookie(self, monkeypatch):
+        monkeypatch.setenv("HERMES_WEBUI_GATEWAY_DIALECT", "sentry")
+        import api.auth as auth
+        monkeypatch.setattr(auth, "get_session_info", lambda cv: {"gateway": {"access_token": "USERTOK"}})
+        gc._resolve_sentry_token_for_request(_FakeHandler("hermes_session=abc.sig"), "sess-x")
+        assert gc.get_sentry_session_token("sess-x") == "USERTOK"
+        gc.set_sentry_session_token("sess-x", None)
+
+    def test_resolve_is_noop_when_not_sentry(self, monkeypatch):
+        monkeypatch.delenv("HERMES_WEBUI_GATEWAY_DIALECT", raising=False)
+        gc._resolve_sentry_token_for_request(_FakeHandler("hermes_session=abc.sig"), "sess-y")
+        assert gc.get_sentry_session_token("sess-y") is None

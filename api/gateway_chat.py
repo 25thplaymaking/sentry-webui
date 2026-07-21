@@ -39,6 +39,11 @@ logger = logging.getLogger(__name__)
 # Maps stream_id -> gateway run_id for approval response relay.
 _STREAM_RUN_IDS: dict[str, str] = {}
 
+# Per-user Sentry Gateway access tokens, keyed by WebUI chat session id. Set by
+# the chat-start handler (which has the auth cookie) and read by the worker
+# thread (which does not, and cannot see request scope). Sentry dialect only.
+_SENTRY_SESSION_TOKENS: dict[str, str] = {}
+
 _WEBUI_CHAT_BACKEND_ENV = "HERMES_WEBUI_CHAT_BACKEND"
 _WEBUI_GATEWAY_BASE_URL_ENV = "HERMES_WEBUI_GATEWAY_BASE_URL"
 _WEBUI_GATEWAY_API_KEY_ENV = "HERMES_WEBUI_GATEWAY_API_KEY"
@@ -197,6 +202,47 @@ def _gateway_dialect(config_data=None, environ: dict[str, str] | None = None) ->
         or ""
     ).strip().lower()
     return "sentry" if raw == "sentry" else "hermes"
+
+
+def set_sentry_session_token(session_id, token) -> None:
+    """Register (or clear) the per-user Gateway token for a chat session."""
+    key = str(session_id)
+    if token:
+        _SENTRY_SESSION_TOKENS[key] = str(token)
+    else:
+        _SENTRY_SESSION_TOKENS.pop(key, None)
+
+
+def get_sentry_session_token(session_id):
+    return _SENTRY_SESSION_TOKENS.get(str(session_id))
+
+
+def _resolve_sentry_token_for_request(handler, session_id) -> None:
+    """In sentry dialect, lift the logged-in user's Gateway token off the auth
+    cookie and register it for this chat session, so the worker thread routes the
+    turn as that user rather than with the shared key. No-op otherwise, and never
+    raises into the request path.
+    """
+    try:
+        if _gateway_dialect() != "sentry":
+            return
+        from http.cookies import SimpleCookie
+
+        from api.auth import COOKIE_NAME, get_session_info
+
+        raw = handler.headers.get("Cookie", "") if getattr(handler, "headers", None) else ""
+        if not raw:
+            return
+        morsel = SimpleCookie(raw).get(COOKIE_NAME)
+        if morsel is None:
+            return
+        info = get_session_info(morsel.value)
+        gateway = info.get("gateway") if isinstance(info, dict) else None
+        token = gateway.get("access_token") if isinstance(gateway, dict) else None
+        if token:
+            set_sentry_session_token(session_id, token)
+    except Exception:
+        logger.debug("failed to resolve sentry session token", exc_info=True)
 
 
 def _translate_sentry_event(payload) -> list[tuple[str, dict]]:
@@ -920,7 +966,7 @@ def _run_gateway_chat_streaming(
                     msg_text,
                     stream_id,
                     base_url,
-                    gateway_token or api_key,
+                    gateway_token or get_sentry_session_token(session_id) or api_key,
                     put_gateway_event=put_gateway_event,
                     cancel_event=cancel_event,
                 )
