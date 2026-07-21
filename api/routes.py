@@ -13494,6 +13494,28 @@ def handle_get(handler, parsed) -> bool:
 
     # ── Skills API (GET) ──
     if parsed.path == "/api/skills":
+        # Sentry dialect: proxy to the Gateway's profile-scoped governance view
+        # instead of the absent local agent package (which 500'd). Falls through
+        # to the legacy local path for shared-password deployments.
+        from api.gateway_chat import _gateway_dialect, sentry_access_token_from_handler
+        if _gateway_dialect() == "sentry":
+            token = sentry_access_token_from_handler(handler)
+            if token:
+                from api.sentry_gateway_client import SentryGatewayError, get_json
+                try:
+                    gw = get_json("/api/skills", token) or []
+                    skills = [
+                        {
+                            "name": s.get("name"),
+                            "description": f"state: {s.get('state')}",
+                            "enabled": s.get("state") == "active",
+                            "state": s.get("state"),
+                        }
+                        for s in gw if isinstance(s, dict)
+                    ]
+                    return j(handler, {"skills": skills})
+                except SentryGatewayError as exc:
+                    return j(handler, {"skills": [], "unavailable": True, "error": str(exc)})
         qs = parse_qs(parsed.query)
         category = qs.get("category", [None])[0]
         data = _skills_list_from_dir(_active_skills_dir(), category=category)

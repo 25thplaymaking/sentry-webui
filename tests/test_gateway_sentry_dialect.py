@@ -161,3 +161,19 @@ class TestTokenRefresh:
 
     def test_no_refresh_token_keeps_current(self):
         assert gc._maybe_refresh_sentry_token("cookie", "tok", None) == "tok"
+
+
+class TestAccessTokenFromHandler:
+    def test_returns_token_in_sentry_mode(self, monkeypatch):
+        monkeypatch.setenv("HERMES_WEBUI_GATEWAY_DIALECT", "sentry")
+        import api.auth as auth
+        monkeypatch.setattr(auth, "get_session_info", lambda cv: {"gateway": {"access_token": "AT", "refresh_token": None}})
+        assert gc.sentry_access_token_from_handler(_FakeHandler("hermes_session=x.y")) == "AT"
+
+    def test_none_when_not_sentry(self, monkeypatch):
+        monkeypatch.delenv("HERMES_WEBUI_GATEWAY_DIALECT", raising=False)
+        assert gc.sentry_access_token_from_handler(_FakeHandler("hermes_session=x.y")) is None
+
+    def test_none_when_no_cookie(self, monkeypatch):
+        monkeypatch.setenv("HERMES_WEBUI_GATEWAY_DIALECT", "sentry")
+        assert gc.sentry_access_token_from_handler(_FakeHandler("")) is None

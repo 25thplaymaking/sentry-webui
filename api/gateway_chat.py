@@ -217,38 +217,44 @@ def get_sentry_session_token(session_id):
     return _SENTRY_SESSION_TOKENS.get(str(session_id))
 
 
-def _resolve_sentry_token_for_request(handler, session_id) -> None:
-    """In sentry dialect, lift the logged-in user's Gateway token off the auth
-    cookie and register it for this chat session, so the worker thread routes the
-    turn as that user rather than with the shared key. No-op otherwise, and never
-    raises into the request path.
+def sentry_access_token_from_handler(handler):
+    """Return the logged-in user's (possibly-refreshed) Gateway access token from
+    the request's auth cookie, or None. Sentry dialect only. Used by chat and by
+    every panel endpoint that proxies to the Gateway as this user. Never raises.
     """
     try:
         if _gateway_dialect() != "sentry":
-            return
+            return None
         from http.cookies import SimpleCookie
 
         from api.auth import COOKIE_NAME, get_session_info
 
         raw = handler.headers.get("Cookie", "") if getattr(handler, "headers", None) else ""
         if not raw:
-            return
+            return None
         morsel = SimpleCookie(raw).get(COOKIE_NAME)
         if morsel is None:
-            return
+            return None
         info = get_session_info(morsel.value)
         gateway = info.get("gateway") if isinstance(info, dict) else None
         if not isinstance(gateway, dict):
-            return
-        token = _maybe_refresh_sentry_token(
+            return None
+        return _maybe_refresh_sentry_token(
             morsel.value,
             gateway.get("access_token"),
             gateway.get("refresh_token"),
         )
-        if token:
-            set_sentry_session_token(session_id, token)
     except Exception:
-        logger.debug("failed to resolve sentry session token", exc_info=True)
+        logger.debug("failed to read sentry access token", exc_info=True)
+        return None
+
+
+def _resolve_sentry_token_for_request(handler, session_id) -> None:
+    """Register this request's user token for the chat session so the worker
+    thread (no request scope) can route the turn as that user."""
+    token = sentry_access_token_from_handler(handler)
+    if token:
+        set_sentry_session_token(session_id, token)
 
 
 def _maybe_refresh_sentry_token(cookie_value, access_token, refresh_token, *, skew_secs=120.0):
