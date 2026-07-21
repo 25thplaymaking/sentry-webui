@@ -552,18 +552,33 @@ def is_sentry_auth_enabled() -> bool:
         return False
 
 
-def password_login_allowed() -> bool:
-    """False under the sentry dialect, so enrollment is the only door.
+_SENTRY_ALLOW_ALT_LOGIN_ENV = 'HERMES_WEBUI_SENTRY_ALLOW_PASSWORD'
 
-    A shared-password session carries no profile identity: it would sign in
-    successfully and then 401 on every Gateway call, which is more confusing
-    than being turned away. Set HERMES_WEBUI_SENTRY_ALLOW_PASSWORD=1 to restore
-    password login (recovery hatch for a misprovisioned team).
+
+def alternate_login_allowed() -> bool:
+    """False under the sentry dialect: enrollment is the only door.
+
+    "Alternate" means every login method that is NOT redeeming an enrollment
+    code -- shared password, passkey, and native OIDC. They all end at
+    ``create_session()`` with no ``gateway`` blob, i.e. a session with no Sentry
+    profile identity behind it. Such a session signs in successfully, renders
+    the shell, and then 401s on every Gateway call: strictly more confusing than
+    being turned away at the door.
+
+    ``HERMES_WEBUI_SENTRY_ALLOW_PASSWORD=1`` reopens them. It is deliberately
+    ONE knob for all three (the name is kept for compatibility with the
+    already-deployed password gate): a team whose only non-enrollment door is a
+    passkey needs the same way back in as a password-only one.
     """
     if not is_sentry_auth_enabled():
         return True
-    raw = os.getenv('HERMES_WEBUI_SENTRY_ALLOW_PASSWORD', '').strip().lower()
+    raw = os.getenv(_SENTRY_ALLOW_ALT_LOGIN_ENV, '').strip().lower()
     return raw in ('1', 'true', 'yes', 'on')
+
+
+def password_login_allowed() -> bool:
+    """Whether shared-password sign-in is accepted. See alternate_login_allowed()."""
+    return alternate_login_allowed()
 
 
 def is_auth_enabled() -> bool:

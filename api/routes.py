@@ -10035,7 +10035,7 @@ button:focus-visible{outline:2px solid var(--fs-hair-strong);outline-offset:2px}
     {{SENTRY_ENROLL_HTML}}
     {{PASSWORD_INPUT_HTML}}
     <button type="submit">{{LOGIN_BTN}}</button>
-    <button type="button" id="passkey-login" class="passkey-login" style="display:none">Sign in with passkey</button>
+    {{PASSKEY_LOGIN_HTML}}
     {{OIDC_LOGIN_HTML}}
   </form>
   <div class="err" id="err"></div>
@@ -10119,6 +10119,24 @@ def _sentry_enroll_html() -> str:
     )
 
 
+# One refusal message for every non-enrollment door, so the user is always told
+# the same thing: the code they were given is what signs them in.
+_ALT_LOGIN_REFUSED_MSG = (
+    "{method} sign-in is disabled on this deployment. "
+    "Use your enrollment code to sign in."
+)
+
+
+def _alternate_login_allowed() -> bool:
+    """Never raises: a failure here must not lock out a working deployment."""
+    try:
+        from api.auth import alternate_login_allowed
+
+        return alternate_login_allowed()
+    except Exception:
+        return True
+
+
 def _password_login_allowed() -> bool:
     """Never raises: a failure here must not blank the login form."""
     try:
@@ -10127,6 +10145,21 @@ def _password_login_allowed() -> bool:
         return password_login_allowed()
     except Exception:
         return True
+
+
+def _passkey_login_html() -> str:
+    """The passkey button, dropped when non-enrollment sign-in is refused.
+
+    login.js only reveals the button when /api/auth/status reports a registered
+    credential, but that flag is about credential storage, not about whether the
+    door is open — so the button has to be withheld server-side, the same way
+    the password input is."""
+    if not _alternate_login_allowed():
+        return ""
+    return (
+        '<button type="button" id="passkey-login" class="passkey-login" '
+        'style="display:none">Sign in with passkey</button>'
+    )
 
 
 def _login_password_html() -> str:
@@ -10142,6 +10175,10 @@ def _login_password_html() -> str:
 
 
 def _oidc_login_html(parsed) -> str:
+    # Withheld under the sentry dialect: the SSO route now 403s, so offering the
+    # link would advertise a door that is bolted shut.
+    if not _alternate_login_allowed():
+        return ""
     try:
         from api.auth_oidc import is_oidc_enabled
     except Exception:
@@ -12081,6 +12118,7 @@ def handle_get(handler, parsed) -> bool:
             .replace(
                 "{{LOGIN_CONN_FAILED}}", _html.escape(_login_strings["conn_failed"])
             )
+            .replace("{{PASSKEY_LOGIN_HTML}}", _passkey_login_html())
             .replace("{{OIDC_LOGIN_HTML}}", _oidc_login_html(parsed))
             .replace("{{SENTRY_ENROLL_HTML}}", _sentry_enroll_html())
         )
@@ -12089,6 +12127,10 @@ def handle_get(handler, parsed) -> bool:
     if parsed.path == "/api/auth/oidc/start":
         from api.auth_oidc import OIDCAuthError, OIDCConfigError, build_authorization_redirect
 
+        # Sentry dialect: an IdP assertion is not a Sentry identity. See
+        # api.auth.alternate_login_allowed().
+        if not _alternate_login_allowed():
+            return bad(handler, _ALT_LOGIN_REFUSED_MSG.format(method="SSO"), 403)
         next_path = _safe_login_redirect_path(
             parse_qs(parsed.query or "").get("next", [""])[0]
         )
@@ -12112,6 +12154,11 @@ def handle_get(handler, parsed) -> bool:
         from api.auth import create_session, set_auth_cookie
         from api.auth_oidc import OIDCAuthError, OIDCConfigError, complete_authorization_code_flow
 
+        # Gate the callback as well as the start: the start route is not the
+        # only way to reach here (a state minted before the flip, or a bookmarked
+        # IdP redirect, lands straight on the callback).
+        if not _alternate_login_allowed():
+            return bad(handler, _ALT_LOGIN_REFUSED_MSG.format(method="SSO"), 403)
         query = parse_qs(parsed.query or "")
         error = str(query.get("error", [""])[0] or "").strip()
         if error:
@@ -16533,6 +16580,10 @@ def handle_post(handler, parsed) -> bool:
 
         if not _passkey_feature_flag_enabled():
             return j(handler, {"error": "Passkey support is disabled. Set HERMES_WEBUI_PASSKEY=1 or webui_passkey_enabled: true to enable."}, status=404)
+        # Refuse at the challenge step too: issuing a WebAuthn challenge whose
+        # verification step is closed only misdirects the user.
+        if not _alternate_login_allowed():
+            return bad(handler, _ALT_LOGIN_REFUSED_MSG.format(method="Passkey"), 403)
         if not is_auth_enabled():
             return j(handler, {"error": "Auth not enabled"}, status=400)
         try:
@@ -16549,6 +16600,11 @@ def handle_post(handler, parsed) -> bool:
 
         if not _passkey_feature_flag_enabled():
             return j(handler, {"error": "Passkey support is disabled."}, status=404)
+        # Sentry dialect: a passkey proves possession of a device, not a Sentry
+        # profile. The session it would mint carries no Gateway token, so it
+        # signs in and then 401s on every Gateway call. Enrollment is the door.
+        if not _alternate_login_allowed():
+            return bad(handler, _ALT_LOGIN_REFUSED_MSG.format(method="Passkey"), 403)
         if not is_auth_enabled():
             return j(handler, {"error": "Auth not enabled"}, status=400)
         client_ip = handler.client_address[0]
