@@ -1,9 +1,13 @@
 """The login page must show the door that actually works.
 
-Once password sign-in is refused (sentry dialect), rendering a password box is
-a trap: the user types the shared password and is rejected every time. The page
-should offer the enrollment field alone, and it must carry the autofocus that
-the password box used to own.
+Once SHARED-password sign-in is refused (sentry dialect), rendering the shared
+password box is a trap: the user types the deployment password and is rejected
+every time. It stays withheld.
+
+What replaced it is a per-user credential -- username + password, checked by the
+Gateway -- rendered by `_sentry_credential_html()`. That is a different control
+with different ids, and it is what now carries the autofocus. The enrollment
+code stays on the page beside it for pairing a device.
 """
 
 import api.routes as routes
@@ -35,15 +39,33 @@ def test_password_input_returns_when_the_escape_hatch_is_set(monkeypatch):
     assert 'type="password"' in routes._login_password_html()
 
 
-def test_enrollment_field_takes_autofocus_when_it_is_the_only_door(monkeypatch):
+def test_shared_password_box_yields_autofocus_to_the_per_user_credential(monkeypatch):
+    """With the escape hatch on, both render. Two autofocus attributes on one
+    form is a bug even though the browser quietly honours the first."""
+    _sentry(monkeypatch, allow_password=True)
+    assert "autofocus" not in routes._login_password_html()
+    assert "autofocus" in routes._sentry_credential_html()
+
+
+def test_enrollment_field_is_still_offered(monkeypatch):
+    """It is no longer the only door -- username+password is the normal one --
+    but it is still how a fresh device pairs and how someone with no password
+    yet gets in, so it must keep rendering."""
     _sentry(monkeypatch)
-    enroll = routes._sentry_enroll_html()
-    assert 'id="enroll-code"' in enroll
-    assert "autofocus" in enroll, "the only input on the page must be focused"
+    assert 'id="enroll-code"' in routes._sentry_enroll_html()
 
 
-def test_enrollment_field_does_not_steal_autofocus_from_password(monkeypatch):
-    """With the escape hatch on, both fields render — password keeps autofocus."""
+def test_autofocus_lands_on_the_first_usable_field(monkeypatch):
+    """That field used to be the enrollment code, because it was the only input
+    on the page. It is now the username, so the focus moved with it."""
+    _sentry(monkeypatch)
+    assert "autofocus" in routes._sentry_credential_html()
+    assert "autofocus" not in routes._sentry_enroll_html()
+
+
+def test_enrollment_field_does_not_steal_autofocus_with_the_escape_hatch_on(monkeypatch):
+    """With the escape hatch on, the shared-password box renders too. The
+    enrollment code must not fight either of the other two for focus."""
     _sentry(monkeypatch, allow_password=True)
     assert "autofocus" not in routes._sentry_enroll_html()
 

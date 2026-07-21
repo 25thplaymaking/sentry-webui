@@ -10032,6 +10032,7 @@ button:focus-visible{outline:2px solid var(--fs-hair-strong);outline-offset:2px}
   <h1>{{BOT_NAME}}</h1>
   <p class="sub">{{LOGIN_SUBTITLE}}</p>
   <form id="login-form" data-invalid-pw="{{LOGIN_INVALID_PW}}" data-conn-failed="{{LOGIN_CONN_FAILED}}">
+    {{SENTRY_CREDENTIAL_HTML}}
     {{SENTRY_ENROLL_HTML}}
     {{PASSWORD_INPUT_HTML}}
     <button type="submit">{{LOGIN_BTN}}</button>
@@ -10097,25 +10098,53 @@ def _request_base_url(handler) -> str:
     return f"{scheme}://{host}"
 
 
+def _is_sentry_dialect() -> bool:
+    """Never raises: a failure here must not blank the login form."""
+    try:
+        from api.gateway_chat import _gateway_dialect
+
+        return _gateway_dialect() == "sentry"
+    except Exception:
+        return False
+
+
+def _sentry_credential_html() -> str:
+    """Username + password inputs, shown only under the sentry gateway dialect.
+
+    These are NOT the shared-password box (`_login_password_html`, id="pw"),
+    which stays withheld here because the shared secret carries no profile
+    identity and is still refused. This pair is a per-user Gateway credential:
+    the normal handover is "here is a URL, a username and a password", and this
+    is where that is typed. Distinct ids keep the two concepts from being
+    confused by login.js or by a future reader.
+
+    Carries the autofocus because it is now the first usable field on the page.
+    """
+    if not _is_sentry_dialect():
+        return ""
+    return (
+        '<input type="text" id="sentry-username" placeholder="Username" '
+        'autocomplete="username" spellcheck="false" autocapitalize="none" autofocus>'
+        '<input type="password" id="sentry-password" placeholder="Password" '
+        'autocomplete="current-password">'
+    )
+
+
 def _sentry_enroll_html() -> str:
     """Enrollment-code input for the login form, shown only when the deployment
     runs the sentry gateway dialect (per-user login). Empty otherwise, so
     shared-password deployments render exactly as before.
 
-    Takes the autofocus when password sign-in is refused, because then this is
-    the only input on the page."""
-    try:
-        from api.gateway_chat import _gateway_dialect
-
-        if _gateway_dialect() != "sentry":
-            return ""
-    except Exception:
+    It stays on the page beside username+password because it is still how a
+    fresh device pairs, and how someone who has not been given a password yet
+    gets in. It no longer takes the autofocus: the username field is now the
+    first usable one."""
+    if not _is_sentry_dialect():
         return ""
-    autofocus = "" if _password_login_allowed() else " autofocus"
     return (
         '<input type="text" id="enroll-code" '
-        'placeholder="Enrollment code (first sign-in)" '
-        f'autocomplete="off" spellcheck="false"{autofocus}>'
+        'placeholder="Enrollment code (pair a device)" '
+        'autocomplete="off" spellcheck="false">'
     )
 
 
@@ -10185,7 +10214,15 @@ def _login_password_html() -> str:
     substituted into the page before that token is replaced."""
     if not _password_login_allowed():
         return ""
-    return '<input type="password" id="pw" placeholder="{{LOGIN_PLACEHOLDER}}" autofocus>'
+    # Under the sentry dialect with the escape hatch on, this box renders
+    # alongside the per-user credential block, which already owns the autofocus.
+    # Two autofocus attributes on one form is a bug even though the browser
+    # quietly honours the first.
+    autofocus = "" if _is_sentry_dialect() else " autofocus"
+    return (
+        '<input type="password" id="pw" '
+        f'placeholder="{{{{LOGIN_PLACEHOLDER}}}}"{autofocus}>'
+    )
 
 
 def _oidc_login_html(parsed) -> str:
@@ -12134,6 +12171,7 @@ def handle_get(handler, parsed) -> bool:
             )
             .replace("{{PASSKEY_LOGIN_HTML}}", _passkey_login_html())
             .replace("{{OIDC_LOGIN_HTML}}", _oidc_login_html(parsed))
+            .replace("{{SENTRY_CREDENTIAL_HTML}}", _sentry_credential_html())
             .replace("{{SENTRY_ENROLL_HTML}}", _sentry_enroll_html())
         )
         return t(handler, _page, content_type="text/html; charset=utf-8")
@@ -16525,17 +16563,21 @@ def handle_post(handler, parsed) -> bool:
                 {"error": "Too many attempts. Try again in a minute."},
                 status=429,
             )
-        # Sentry dialect: per-user login by redeeming a Gateway enrollment code.
-        # Inert unless the deployment opts into the sentry dialect AND a code is
-        # supplied, so shared-password login is unchanged everywhere else.
+        # Sentry dialect: per-user login, either by username+password (the
+        # normal handover) or by redeeming a Gateway enrollment code (pairing a
+        # device, and the way in for someone who has no password yet). Both are
+        # inert unless the deployment opts into the sentry dialect, so
+        # shared-password login is unchanged everywhere else.
+        try:
+            from api.gateway_chat import _gateway_dialect
+            _sentry_dialect = _gateway_dialect() == "sentry"
+        except Exception:
+            _sentry_dialect = False
+
         enrollment_code = str(body.get("enrollment_code") or "").strip()
         if enrollment_code:
-            try:
-                from api.gateway_chat import _gateway_dialect, _gateway_base_url
-                _sentry_dialect = _gateway_dialect() == "sentry"
-            except Exception:
-                _sentry_dialect = False
             if _sentry_dialect:
+                from api.gateway_chat import _gateway_base_url
                 from api.sentry_gateway_auth import enroll_complete, SentryAuthError
                 device_name = (str(body.get("device_name") or "Sentry Web").strip() or "Sentry Web")[:100]
                 try:
@@ -16564,9 +16606,53 @@ def handle_post(handler, parsed) -> bool:
                 handler.end_headers()
                 handler.wfile.write(enroll_resp)
                 return True
+
+        # Sentry dialect: username + password. The Gateway mints exactly the
+        # pair the enrollment path mints, so the session is built identically --
+        # including NOT passing bound_profile (see the note above; a Gateway
+        # profile UUID in that field 403s every request).
+        sentry_username = str(body.get("username") or "").strip()
+        if _sentry_dialect and sentry_username:
+            from api.gateway_chat import _gateway_base_url
+            from api.sentry_gateway_auth import password_login, SentryAuthError
+
+            device_name = (str(body.get("device_name") or "Sentry Web").strip() or "Sentry Web")[:100]
+            try:
+                pair = password_login(
+                    _gateway_base_url(),
+                    sentry_username,
+                    str(body.get("password") or ""),
+                    device_name,
+                )
+            except SentryAuthError as exc:
+                _record_login_attempt(client_ip)
+                return bad(handler, str(exc) or "Sign-in failed", exc.status or 401)
+            _clear_login_attempts(client_ip)
+            cookie_val = create_session(
+                auth_type="sentry",
+                username=str(pair.get("profile_id") or ""),
+                gateway=pair,
+            )
+            # must_change is reported so the client can force a change instead
+            # of dropping the user into a session on a credential the operator
+            # has seen.
+            pw_resp = json.dumps(
+                {"ok": True, "must_change": bool(pair.get("must_change"))}
+            ).encode()
+            handler.send_response(200)
+            handler.send_header("Content-Type", "application/json")
+            handler.send_header("Content-Length", str(len(pw_resp)))
+            handler.send_header("Cache-Control", "no-store")
+            _security_headers(handler)
+            set_auth_cookie(handler, cookie_val)
+            handler.end_headers()
+            handler.wfile.write(pw_resp)
+            return True
+
         # Sentry dialect: the shared password is not an identity. A session
         # minted from it carries no profile, so it would sign in and then 401 on
-        # every Gateway call. Refuse it outright — enrollment is the only door.
+        # every Gateway call. Refuse it outright — a per-user credential or an
+        # enrollment code is the door.
         from api.auth import password_login_allowed
 
         if not password_login_allowed():
@@ -16593,6 +16679,38 @@ def handle_post(handler, parsed) -> bool:
         handler.end_headers()
         handler.wfile.write(body)
         return True
+
+    # ── Sentry per-user password change (POST) ──
+    if parsed.path == "/api/auth/password/change":
+        # Absent outside the sentry dialect: a shared-password deployment has no
+        # per-user Gateway credential to change, so answering here at all would
+        # advertise a door that goes nowhere.
+        try:
+            from api.gateway_chat import _gateway_dialect
+
+            _sentry_dialect = _gateway_dialect() == "sentry"
+        except Exception:
+            _sentry_dialect = False
+        if not _sentry_dialect:
+            return j(handler, {"error": "Not found"}, status=404)
+
+        from api.gateway_chat import _gateway_base_url, sentry_access_token_from_handler
+        from api.sentry_gateway_auth import password_change, SentryAuthError
+
+        access_token = sentry_access_token_from_handler(handler)
+        if not access_token:
+            # No per-user token means no identity to change a credential for.
+            return _sentry_no_identity(handler)
+        try:
+            password_change(
+                _gateway_base_url(),
+                access_token,
+                str(body.get("current_password") or ""),
+                str(body.get("new_password") or ""),
+            )
+        except SentryAuthError as exc:
+            return bad(handler, str(exc) or "Password change failed", exc.status or 400)
+        return j(handler, {"ok": True})
 
     if parsed.path == "/api/auth/passkey/options":
         from api.auth import _passkey_feature_flag_enabled, is_auth_enabled
