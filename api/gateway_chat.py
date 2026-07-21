@@ -43,6 +43,7 @@ _WEBUI_CHAT_BACKEND_ENV = "HERMES_WEBUI_CHAT_BACKEND"
 _WEBUI_GATEWAY_BASE_URL_ENV = "HERMES_WEBUI_GATEWAY_BASE_URL"
 _WEBUI_GATEWAY_API_KEY_ENV = "HERMES_WEBUI_GATEWAY_API_KEY"
 _WEBUI_GATEWAY_USE_RUNS_API_ENV = "HERMES_WEBUI_GATEWAY_USE_RUNS_API"
+_WEBUI_GATEWAY_DIALECT_ENV = "HERMES_WEBUI_GATEWAY_DIALECT"
 _GATEWAY_CHAT_BACKENDS = {"gateway", "api_server", "api-server"}
 
 
@@ -178,6 +179,117 @@ def _gateway_use_runs_api_enabled(config_data=None, environ: dict[str, str] | No
         or ""
     ).strip().lower()
     return raw in ("1", "true", "yes", "on")
+
+
+def _gateway_dialect(config_data=None, environ: dict[str, str] | None = None) -> str:
+    """Which gateway protocol to speak.
+
+    ``sentry`` routes browser chat to the Sentry Gateway's ``/api/chat/turn``
+    (per-user, profile-scoped routing); ``hermes`` (the default) talks to the
+    Hermes API server exactly as before. Unset -> ``hermes`` so existing
+    deployments are untouched.
+    """
+    source = os.environ if environ is None else environ
+    cfg = config_data if isinstance(config_data, dict) else {}
+    raw = str(
+        source.get(_WEBUI_GATEWAY_DIALECT_ENV)
+        or cfg.get("webui_gateway_dialect")
+        or ""
+    ).strip().lower()
+    return "sentry" if raw == "sentry" else "hermes"
+
+
+def _translate_sentry_event(payload) -> list[tuple[str, dict]]:
+    """Map one Sentry Gateway SSE content event to browser events.
+
+    Sentry emits ``{"type","summary","maySpeak",...}``. Only content
+    (``message``) events become browser ``token`` events here; control events
+    (``turn.completed`` / ``error`` / ``turn.failed``) are handled by the caller.
+    Pure and unit-tested so the browser-contract mapping is verifiable without a
+    live gateway.
+    """
+    if not isinstance(payload, dict):
+        return []
+    etype = str(payload.get("type") or "").strip()
+    summary = str(payload.get("summary") or "")
+    if etype == "message" and summary:
+        return [("token", {"text": summary})]
+    return []
+
+
+def _run_sentry_turn_streaming(
+    session_id,
+    msg_text,
+    stream_id,
+    base_url,
+    api_key,
+    *,
+    put_gateway_event,
+    cancel_event,
+    quoted_context=None,
+    timeout=None,
+):
+    """Bridge one WebUI turn through the Sentry Gateway ``/api/chat/turn``.
+
+    Returns ``(final_text, usage)`` like the runs-API path, or ``(None, usage)``
+    if cancelled. Raises on a terminal agent error so the worker's existing
+    error-settle path handles it. Incremental ``message`` events stream as
+    ``token`` events; if the agent returns only a final ``turn.completed``
+    summary with no prior tokens, that summary is surfaced so a non-streaming
+    agent still renders its answer.
+    """
+    url = f"{base_url}/api/chat/turn"
+    headers = {"Content-Type": "application/json", "Accept": "text/event-stream"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    body: dict[str, Any] = {"prompt": str(msg_text or ""), "session_id": session_id}
+    if quoted_context:
+        body["quoted_context"] = list(quoted_context)
+    req = urllib.request.Request(
+        url, data=json.dumps(body).encode("utf-8"), headers=headers, method="POST"
+    )
+    final_text = ""
+    completed_summary = ""
+    terminal_error = ""
+    usage = {"input_tokens": 0, "output_tokens": 0, "estimated_cost": 0}
+    read_timeout = timeout if timeout is not None else _gateway_read_timeout_secs()
+    with urllib.request.urlopen(req, timeout=read_timeout) as resp:
+        for raw_line in _iter_sse_lines_cancellable(resp, cancel_event):
+            if cancel_event.is_set():
+                put_gateway_event("cancel", {"message": "Cancelled by user"})
+                return None, usage
+            line = raw_line.decode("utf-8", errors="replace").strip()
+            if not line or not line.startswith("data:"):
+                continue
+            data = line[5:].strip()
+            if data == "[DONE]":
+                break
+            try:
+                payload = json.loads(data)
+            except json.JSONDecodeError:
+                continue
+            etype = str(payload.get("type") or "").strip()
+            if etype in ("error", "turn.failed"):
+                terminal_error = str(payload.get("summary") or "The agent run failed.")
+                continue
+            if etype == "turn.completed":
+                completed_summary = str(payload.get("summary") or "")
+                continue
+            for event_name, event_payload in _translate_sentry_event(payload):
+                if event_name == "token":
+                    delta = event_payload.get("text") or ""
+                    final_text += delta
+                    if stream_id in STREAM_PARTIAL_TEXT:
+                        STREAM_PARTIAL_TEXT[stream_id] += delta
+                put_gateway_event(event_name, event_payload)
+    if terminal_error:
+        raise RuntimeError(terminal_error)
+    if not final_text and completed_summary:
+        final_text = completed_summary
+        if stream_id in STREAM_PARTIAL_TEXT:
+            STREAM_PARTIAL_TEXT[stream_id] += completed_summary
+        put_gateway_event("token", {"text": completed_summary})
+    return final_text, usage
 
 
 def _gateway_reasoning_effort_for_request(cfg, *, model=None, model_provider=None):
@@ -785,9 +897,39 @@ def _run_gateway_chat_streaming(
             )
         except Exception:
             _gw_overrides = {}
+        # Sentry dialect talks to the Sentry Gateway's /api/chat/turn (per-user
+        # routing), not the Hermes API server. Isolated path; default 'hermes'
+        # leaves existing deployments untouched. The approval-capability probe is
+        # skipped for Sentry (it has no /v1 surface to probe).
+        dialect = _gateway_dialect(cfg)
         # Capability gate: use runs API when gateway advertises approval support.
-        _use_runs_api = _gateway_use_runs_api_enabled(cfg) and gateway_supports_approval(base_url, api_key)
-        if _use_runs_api:
+        _use_runs_api = (
+            dialect != "sentry"
+            and _gateway_use_runs_api_enabled(cfg)
+            and gateway_supports_approval(base_url, api_key)
+        )
+        if dialect == "sentry":
+            try:
+                final_text, usage = _run_sentry_turn_streaming(
+                    session_id,
+                    msg_text,
+                    stream_id,
+                    base_url,
+                    api_key,
+                    put_gateway_event=put_gateway_event,
+                    cancel_event=cancel_event,
+                )
+            except Exception as exc:
+                error_payload = _settle_gateway_terminal_error(
+                    session_id, stream_id, workspace, model, model_provider, str(exc),
+                )
+                if error_payload is None:
+                    return
+                put_gateway_event("apperror", error_payload)
+                return
+            if final_text is None:
+                return
+        elif _use_runs_api:
             body_extras = {}
             if model_provider:
                 body_extras["provider"] = model_provider
