@@ -16307,6 +16307,41 @@ def handle_post(handler, parsed) -> bool:
                 {"error": "Too many attempts. Try again in a minute."},
                 status=429,
             )
+        # Sentry dialect: per-user login by redeeming a Gateway enrollment code.
+        # Inert unless the deployment opts into the sentry dialect AND a code is
+        # supplied, so shared-password login is unchanged everywhere else.
+        enrollment_code = str(body.get("enrollment_code") or "").strip()
+        if enrollment_code:
+            try:
+                from api.gateway_chat import _gateway_dialect, _gateway_base_url
+                _sentry_dialect = _gateway_dialect() == "sentry"
+            except Exception:
+                _sentry_dialect = False
+            if _sentry_dialect:
+                from api.sentry_gateway_auth import enroll_complete, SentryAuthError
+                device_name = (str(body.get("device_name") or "Sentry Web").strip() or "Sentry Web")[:100]
+                try:
+                    pair = enroll_complete(_gateway_base_url(), enrollment_code, device_name)
+                except SentryAuthError as exc:
+                    _record_login_attempt(client_ip)
+                    return bad(handler, str(exc) or "Enrollment failed", exc.status or 401)
+                _clear_login_attempts(client_ip)
+                cookie_val = create_session(
+                    auth_type="sentry",
+                    username=str(pair.get("profile_id") or ""),
+                    bound_profile=str(pair.get("profile_id") or ""),
+                    gateway=pair,
+                )
+                enroll_resp = json.dumps({"ok": True}).encode()
+                handler.send_response(200)
+                handler.send_header("Content-Type", "application/json")
+                handler.send_header("Content-Length", str(len(enroll_resp)))
+                handler.send_header("Cache-Control", "no-store")
+                _security_headers(handler)
+                set_auth_cookie(handler, cookie_val)
+                handler.end_headers()
+                handler.wfile.write(enroll_resp)
+                return True
         password = body.get("password", "")
         if not verify_password(password):
             _record_login_attempt(client_ip)

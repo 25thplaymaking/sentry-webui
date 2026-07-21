@@ -576,18 +576,30 @@ def verify_password(plain: str) -> bool:
     return False
 
 
-def create_session(*, auth_type: str | None = None, username: str | None = None, bound_profile: str | None = None) -> str:
-    """Create a new auth session. Returns signed cookie value."""
+def create_session(*, auth_type: str | None = None, username: str | None = None, bound_profile: str | None = None, gateway: dict | None = None) -> str:
+    """Create a new auth session. Returns signed cookie value.
+
+    ``gateway`` (sentry dialect) carries the logged-in user's Sentry Gateway
+    token pair; it is stored server-side in the session record so chat can route
+    as that user, and is never sent to the browser.
+    """
     token = secrets.token_hex(32)
     expiry = time.time() + _resolve_session_ttl()
     record: float | dict
-    if any(value is not None for value in (auth_type, username, bound_profile)):
+    if any(value is not None for value in (auth_type, username, bound_profile, gateway)):
         record = {
             'expiry': expiry,
             'auth_type': auth_type,
             'username': username,
             'bound_profile': bound_profile,
         }
+        if isinstance(gateway, dict):
+            record['gateway'] = {
+                'access_token': gateway.get('access_token'),
+                'refresh_token': gateway.get('refresh_token'),
+                'profile_id': gateway.get('profile_id'),
+                'device_id': gateway.get('device_id'),
+            }
     else:
         record = expiry
     with _SESSIONS_LOCK:

@@ -769,8 +769,13 @@ def _run_gateway_chat_streaming(
     *,
     model_provider=None,
     goal_related=False,
+    gateway_token=None,
 ):
     """Bridge a WebUI chat turn through Hermes Gateway's API server.
+
+    ``gateway_token`` (sentry dialect only) is the logged-in user's per-user
+    Gateway bearer token; when present it is used instead of the shared API key
+    so the turn routes to that user's own agent.
 
     This default-off path keeps the browser contract unchanged: /api/chat/start
     still returns a local stream_id and /api/chat/stream still receives WebUI SSE
@@ -915,7 +920,7 @@ def _run_gateway_chat_streaming(
                     msg_text,
                     stream_id,
                     base_url,
-                    api_key,
+                    gateway_token or api_key,
                     put_gateway_event=put_gateway_event,
                     cancel_event=cancel_event,
                 )
