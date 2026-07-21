@@ -10032,6 +10032,7 @@ button:focus-visible{outline:2px solid var(--fs-hair-strong);outline-offset:2px}
   <h1>{{BOT_NAME}}</h1>
   <p class="sub">{{LOGIN_SUBTITLE}}</p>
   <form id="login-form" data-invalid-pw="{{LOGIN_INVALID_PW}}" data-conn-failed="{{LOGIN_CONN_FAILED}}">
+    {{SENTRY_ENROLL_HTML}}
     <input type="password" id="pw" placeholder="{{LOGIN_PLACEHOLDER}}" autofocus>
     <button type="submit">{{LOGIN_BTN}}</button>
     <button type="button" id="passkey-login" class="passkey-login" style="display:none">Sign in with passkey</button>
@@ -10094,6 +10095,24 @@ def _request_base_url(handler) -> str:
     scheme = "https" if _is_secure_context(handler) else "http"
     host = str(handler.headers.get("Host") or "").strip() or "127.0.0.1:8787"
     return f"{scheme}://{host}"
+
+
+def _sentry_enroll_html() -> str:
+    """Enrollment-code input for the login form, shown only when the deployment
+    runs the sentry gateway dialect (per-user login). Empty otherwise, so
+    shared-password deployments render exactly as before."""
+    try:
+        from api.gateway_chat import _gateway_dialect
+
+        if _gateway_dialect() != "sentry":
+            return ""
+    except Exception:
+        return ""
+    return (
+        '<input type="text" id="enroll-code" '
+        'placeholder="Enrollment code (first sign-in)" '
+        'autocomplete="off" spellcheck="false">'
+    )
 
 
 def _oidc_login_html(parsed) -> str:
@@ -12010,6 +12029,7 @@ def handle_get(handler, parsed) -> bool:
                 "{{LOGIN_CONN_FAILED}}", _html.escape(_login_strings["conn_failed"])
             )
             .replace("{{OIDC_LOGIN_HTML}}", _oidc_login_html(parsed))
+            .replace("{{SENTRY_ENROLL_HTML}}", _sentry_enroll_html())
         )
         return t(handler, _page, content_type="text/html; charset=utf-8")
 

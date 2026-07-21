@@ -61,11 +61,21 @@ document.addEventListener('DOMContentLoaded', function () {
     e.preventDefault();
     var pw = input.value;
     hideErr();
+    // Sentry multi-user login: if an enrollment-code field is present and
+    // filled, send it so the server redeems a per-user Gateway token. The
+    // server ignores it unless the deployment is in the sentry dialect, so this
+    // is inert for shared-password deployments.
+    var payload = { password: pw };
+    var enrollEl = document.getElementById('enroll-code');
+    if (enrollEl && enrollEl.value.trim()) {
+      payload.enrollment_code = enrollEl.value.trim();
+      payload.device_name = (navigator.userAgent || 'Sentry Web').slice(0, 80);
+    }
     try {
       var res = await fetch('api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password: pw }),
+        body: JSON.stringify(payload),
         credentials: 'include',
       });
       var data = {};
