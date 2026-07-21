@@ -217,6 +217,32 @@ def get_sentry_session_token(session_id):
     return _SENTRY_SESSION_TOKENS.get(str(session_id))
 
 
+class SentryIdentityMissing(Exception):
+    """Raised when a sentry-dialect turn has no per-user Gateway token."""
+
+
+# Surfaced to the browser verbatim, so it names the action that fixes it.
+SENTRY_NO_IDENTITY_MESSAGE = (
+    "This session has no Sentry identity. Sign in again with your enrollment code."
+)
+
+
+def _sentry_turn_token(session_id, gateway_token):
+    """Resolve the bearer for one sentry-dialect turn, or refuse.
+
+    There is deliberately NO fallback to ``HERMES_WEBUI_GATEWAY_API_KEY``. That
+    key is a single deployment-wide credential, not the caller's: routing a turn
+    with it would run the turn as whatever profile it belongs to, so any
+    token-less session would silently chat as that user. It fails closed today
+    only because the Gateway rejects a non-JWT bearer -- an accident of token
+    format, not a control. Fail closed on purpose instead.
+    """
+    token = gateway_token or get_sentry_session_token(session_id)
+    if not token:
+        raise SentryIdentityMissing(SENTRY_NO_IDENTITY_MESSAGE)
+    return token
+
+
 def sentry_access_token_from_handler(handler):
     """Return the logged-in user's (possibly-refreshed) Gateway access token from
     the request's auth cookie, or None. Sentry dialect only. Used by chat and by
@@ -1006,7 +1032,8 @@ def _run_gateway_chat_streaming(
                     msg_text,
                     stream_id,
                     base_url,
-                    gateway_token or get_sentry_session_token(session_id) or api_key,
+                    # Per-user token only -- never the shared api_key.
+                    _sentry_turn_token(session_id, gateway_token),
                     put_gateway_event=put_gateway_event,
                     cancel_event=cancel_event,
                 )

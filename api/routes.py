@@ -10127,6 +10127,20 @@ _ALT_LOGIN_REFUSED_MSG = (
 )
 
 
+def _sentry_no_identity(handler):
+    """401 a sentry-dialect request that carries no per-user Gateway token.
+
+    The alternative -- what these panels used to do -- is falling through to the
+    local WebUI container's own skills/memory/cron/profile data and presenting it
+    as the signed-in user's. Under this dialect the container holds no data that
+    belongs to any particular user, so serving it is answering the wrong
+    question. Refuse and name the fix.
+    """
+    from api.gateway_chat import SENTRY_NO_IDENTITY_MESSAGE
+
+    return bad(handler, SENTRY_NO_IDENTITY_MESSAGE, 401)
+
+
 def _alternate_login_allowed() -> bool:
     """Never raises: a failure here must not lock out a working deployment."""
     try:
@@ -12304,6 +12318,7 @@ def handle_get(handler, parsed) -> bool:
                     return j(handler, get_json("/api/kanban/board", _tok) or {"tasks": [], "columns": []})
                 except SentryGatewayError:
                     return j(handler, {"tasks": [], "columns": [], "unavailable": True})
+            return _sentry_no_identity(handler)
         from api.kanban_bridge import handle_kanban_get
 
         # Only treat an explicit False as "no route matched". None means the
@@ -13545,6 +13560,7 @@ def handle_get(handler, parsed) -> bool:
                     return j(handler, {"jobs": get_json("/api/cron", _tok) or []})
                 except SentryGatewayError:
                     return j(handler, {"jobs": [], "cron_unavailable": True})
+            return _sentry_no_identity(handler)
         # #4768: in split-container / minimal Docker deployments the WebUI image may
         # not ship the agent's `cron` package on its import path. Degrade gracefully
         # (empty list + cron_unavailable flag) instead of 500ing the whole Task tab.
@@ -13634,6 +13650,7 @@ def handle_get(handler, parsed) -> bool:
                     return j(handler, {"skills": skills})
                 except SentryGatewayError as exc:
                     return j(handler, {"skills": [], "unavailable": True, "error": str(exc)})
+            return _sentry_no_identity(handler)
         qs = parse_qs(parsed.query)
         category = qs.get("category", [None])[0]
         data = _skills_list_from_dir(_active_skills_dir(), category=category)
@@ -13720,6 +13737,7 @@ def handle_get(handler, parsed) -> bool:
                     return j(handler, {"sections": get_json("/api/memory", _tok) or []})
                 except SentryGatewayError:
                     return j(handler, {"sections": [], "unavailable": True})
+            return _sentry_no_identity(handler)
         return _handle_memory_read(handler, parsed)
 
     # ── Inbox: Sentry inter-agent messages (GET) ──
@@ -13733,6 +13751,7 @@ def handle_get(handler, parsed) -> bool:
                     return j(handler, {"messages": get_json("/api/agent-messages", _tok) or []})
                 except SentryGatewayError:
                     return j(handler, {"messages": [], "unavailable": True})
+            return _sentry_no_identity(handler)
         return j(handler, {"messages": []})
 
     # ── Profile API (GET) ──
@@ -13753,6 +13772,7 @@ def handle_get(handler, parsed) -> bool:
                     return j(handler, {"profiles": _profiles, "active": _active})
                 except SentryGatewayError:
                     return j(handler, {"profiles": [], "unavailable": True})
+            return _sentry_no_identity(handler)
         from api import profiles as profiles_api
         diag = RequestDiagnostics.maybe_start("GET", parsed.path, logger=logger, print_fn=getattr(handler, '_safe_webui_print', None))
         try:
