@@ -12195,6 +12195,15 @@ def handle_get(handler, parsed) -> bool:
         return _handle_project_os_dashboard(handler, parsed)
 
     if parsed.path.startswith("/api/kanban/"):
+        from api.gateway_chat import _gateway_dialect, sentry_access_token_from_handler
+        if _gateway_dialect() == "sentry" and parsed.path == "/api/kanban/board":
+            _tok = sentry_access_token_from_handler(handler)
+            if _tok:
+                from api.sentry_gateway_client import SentryGatewayError, get_json
+                try:
+                    return j(handler, get_json("/api/kanban/board", _tok) or {"tasks": [], "columns": []})
+                except SentryGatewayError:
+                    return j(handler, {"tasks": [], "columns": [], "unavailable": True})
         from api.kanban_bridge import handle_kanban_get
 
         # Only treat an explicit False as "no route matched". None means the
@@ -13427,6 +13436,15 @@ def handle_get(handler, parsed) -> bool:
     # aggregates per visible profile home so the UI can surface hidden-row
     # counts and, when opted in, read-only foreign rows.
     if parsed.path == "/api/crons":
+        from api.gateway_chat import _gateway_dialect, sentry_access_token_from_handler
+        if _gateway_dialect() == "sentry":
+            _tok = sentry_access_token_from_handler(handler)
+            if _tok:
+                from api.sentry_gateway_client import SentryGatewayError, get_json
+                try:
+                    return j(handler, {"jobs": get_json("/api/cron", _tok) or []})
+                except SentryGatewayError:
+                    return j(handler, {"jobs": [], "cron_unavailable": True})
         # #4768: in split-container / minimal Docker deployments the WebUI image may
         # not ship the agent's `cron` package on its import path. Degrade gracefully
         # (empty list + cron_unavailable flag) instead of 500ing the whole Task tab.
@@ -13593,10 +13611,48 @@ def handle_get(handler, parsed) -> bool:
 
     # ── Memory API (GET) ──
     if parsed.path == "/api/memory":
+        from api.gateway_chat import _gateway_dialect, sentry_access_token_from_handler
+        if _gateway_dialect() == "sentry":
+            _tok = sentry_access_token_from_handler(handler)
+            if _tok:
+                from api.sentry_gateway_client import SentryGatewayError, get_json
+                try:
+                    return j(handler, {"sections": get_json("/api/memory", _tok) or []})
+                except SentryGatewayError:
+                    return j(handler, {"sections": [], "unavailable": True})
         return _handle_memory_read(handler, parsed)
+
+    # ── Inbox: Sentry inter-agent messages (GET) ──
+    if parsed.path == "/api/agent-messages":
+        from api.gateway_chat import _gateway_dialect, sentry_access_token_from_handler
+        if _gateway_dialect() == "sentry":
+            _tok = sentry_access_token_from_handler(handler)
+            if _tok:
+                from api.sentry_gateway_client import SentryGatewayError, get_json
+                try:
+                    return j(handler, {"messages": get_json("/api/agent-messages", _tok) or []})
+                except SentryGatewayError:
+                    return j(handler, {"messages": [], "unavailable": True})
+        return j(handler, {"messages": []})
 
     # ── Profile API (GET) ──
     if parsed.path == "/api/profiles":
+        from api.gateway_chat import _gateway_dialect, sentry_access_token_from_handler
+        if _gateway_dialect() == "sentry":
+            _tok = sentry_access_token_from_handler(handler)
+            if _tok:
+                from api.sentry_gateway_client import SentryGatewayError, get_json
+                try:
+                    _gw = get_json("/api/profiles/me", _tok) or []
+                    _profiles = [
+                        {"name": p.get("display_name"), "id": str(p.get("id")),
+                         "kind": p.get("kind"), "active": bool(p.get("is_active"))}
+                        for p in _gw if isinstance(p, dict)
+                    ]
+                    _active = next((p["name"] for p in _profiles if p["active"]), None)
+                    return j(handler, {"profiles": _profiles, "active": _active})
+                except SentryGatewayError:
+                    return j(handler, {"profiles": [], "unavailable": True})
         from api import profiles as profiles_api
         diag = RequestDiagnostics.maybe_start("GET", parsed.path, logger=logger, print_fn=getattr(handler, '_safe_webui_print', None))
         try:
