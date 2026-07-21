@@ -16453,10 +16453,14 @@ def handle_post(handler, parsed) -> bool:
                     _record_login_attempt(client_ip)
                     return bad(handler, str(exc) or "Enrollment failed", exc.status or 401)
                 _clear_login_attempts(client_ip)
+                # NB: do NOT pass bound_profile. That field is a WebUI/Hermes
+                # profile NAME consumed by the active-profile visibility guard;
+                # the Gateway profile id is a different namespace and would
+                # never match, 403-ing every request. The Gateway identity
+                # travels in `gateway` and is enforced by the Gateway itself.
                 cookie_val = create_session(
                     auth_type="sentry",
                     username=str(pair.get("profile_id") or ""),
-                    bound_profile=str(pair.get("profile_id") or ""),
                     gateway=pair,
                 )
                 enroll_resp = json.dumps({"ok": True}).encode()

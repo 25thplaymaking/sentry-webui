@@ -69,6 +69,53 @@ def test_refusal_tells_the_user_to_use_their_enrollment_code(monkeypatch):
     assert "enrollment code" in handler.wfile.getvalue().decode().lower()
 
 
+def test_enrollment_session_does_not_bind_a_webui_profile(monkeypatch):
+    """The Gateway profile id is NOT a WebUI profile name.
+
+    `bound_profile` feeds trusted_session_allows_active_profile(), which every
+    request runs (auth.py hands any non-trusted session to that guard). Storing
+    a Gateway UUID there can never match the active WebUI profile, so every
+    single API call 403s "Profile access forbidden" -- observed live on the
+    first cutover. The Gateway identity belongs in the `gateway` blob only.
+    """
+    import api.sentry_gateway_auth as sga
+
+    monkeypatch.setenv("HERMES_WEBUI_GATEWAY_DIALECT", "sentry")
+    monkeypatch.setattr(auth, "is_auth_enabled", lambda: True)
+    monkeypatch.setattr(
+        sga,
+        "enroll_complete",
+        lambda base, code, name: {
+            "access_token": "a",
+            "refresh_token": "r",
+            "profile_id": "gateway-profile-uuid",
+            "device_id": "d",
+        },
+    )
+
+    captured = {}
+    real_create = auth.create_session
+
+    def _spy(**kw):
+        captured.update(kw)
+        return real_create(**kw)
+
+    monkeypatch.setattr(auth, "create_session", _spy)
+
+    payload = json.dumps({"enrollment_code": "CODE", "device_name": "Browser"}).encode()
+    handler = _FakeHandler(
+        {"Content-Type": "application/json", "Content-Length": str(len(payload))},
+        body=payload,
+    )
+    routes.handle_post(handler, SimpleNamespace(path="/api/auth/login"))
+
+    assert handler.status == 200
+    assert not captured.get("bound_profile"), (
+        "must not bind a WebUI profile to the Gateway profile id"
+    )
+    assert captured["gateway"]["profile_id"] == "gateway-profile-uuid"
+
+
 def test_correct_password_still_works_on_hermes_dialect(monkeypatch):
     handler, session_created = _login(monkeypatch, dialect="hermes")
     assert handler.status == 200
