@@ -130,3 +130,34 @@ class TestSessionToken:
         monkeypatch.delenv("HERMES_WEBUI_GATEWAY_DIALECT", raising=False)
         gc._resolve_sentry_token_for_request(_FakeHandler("hermes_session=abc.sig"), "sess-y")
         assert gc.get_sentry_session_token("sess-y") is None
+
+
+def _jwt_expiring_in(seconds):
+    import base64
+    import json as _j
+    import time as _t
+    payload = base64.urlsafe_b64encode(_j.dumps({"exp": _t.time() + seconds}).encode()).decode().rstrip("=")
+    return f"h.{payload}.s"
+
+
+class TestTokenRefresh:
+    def test_far_from_expiry_is_not_refreshed(self, monkeypatch):
+        import api.sentry_gateway_auth as sga
+        calls = {"n": 0}
+        monkeypatch.setattr(sga, "refresh", lambda *a, **k: (calls.__setitem__("n", calls["n"] + 1), {"access_token": "new"})[1])
+        tok = _jwt_expiring_in(10000)
+        assert gc._maybe_refresh_sentry_token("cookie", tok, "reftok") == tok
+        assert calls["n"] == 0
+
+    def test_near_expiry_refreshes_and_persists(self, monkeypatch):
+        import api.sentry_gateway_auth as sga
+        import api.auth as auth
+        persisted = {}
+        monkeypatch.setattr(sga, "refresh", lambda base, rt, **k: {"access_token": "NEWTOK", "refresh_token": "NEWREF"})
+        monkeypatch.setattr(auth, "update_session_gateway", lambda cv, pair: persisted.update(pair) or True)
+        out = gc._maybe_refresh_sentry_token("cookie", _jwt_expiring_in(10), "reftok")
+        assert out == "NEWTOK"
+        assert persisted.get("refresh_token") == "NEWREF"
+
+    def test_no_refresh_token_keeps_current(self):
+        assert gc._maybe_refresh_sentry_token("cookie", "tok", None) == "tok"

@@ -238,11 +238,45 @@ def _resolve_sentry_token_for_request(handler, session_id) -> None:
             return
         info = get_session_info(morsel.value)
         gateway = info.get("gateway") if isinstance(info, dict) else None
-        token = gateway.get("access_token") if isinstance(gateway, dict) else None
+        if not isinstance(gateway, dict):
+            return
+        token = _maybe_refresh_sentry_token(
+            morsel.value,
+            gateway.get("access_token"),
+            gateway.get("refresh_token"),
+        )
         if token:
             set_sentry_session_token(session_id, token)
     except Exception:
         logger.debug("failed to resolve sentry session token", exc_info=True)
+
+
+def _maybe_refresh_sentry_token(cookie_value, access_token, refresh_token, *, skew_secs=120.0):
+    """Return a valid access token, proactively refreshing via the Gateway when
+    the current one is within ``skew_secs`` of expiry, and persisting the rotated
+    pair back to the session. On any failure returns the original token — the
+    Gateway remains the authority and will 401 if it is truly bad.
+    """
+    try:
+        from api.sentry_gateway_auth import jwt_exp
+        from api.sentry_gateway_auth import refresh as _refresh
+
+        if not refresh_token:
+            return access_token
+        exp = jwt_exp(access_token)
+        if exp is None or (exp - time.time()) > skew_secs:
+            return access_token
+        pair = _refresh(_gateway_base_url(), refresh_token)
+        try:
+            from api.auth import update_session_gateway
+
+            update_session_gateway(cookie_value, pair)
+        except Exception:
+            logger.debug("failed to persist refreshed sentry token", exc_info=True)
+        return pair.get("access_token") or access_token
+    except Exception:
+        logger.debug("sentry token refresh failed", exc_info=True)
+        return access_token
 
 
 def _translate_sentry_event(payload) -> list[tuple[str, dict]]:

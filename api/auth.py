@@ -609,6 +609,30 @@ def create_session(*, auth_type: str | None = None, username: str | None = None,
     return f"{token}.{sig}"
 
 
+def update_session_gateway(cookie_value: str, gateway: dict) -> bool:
+    """Replace the stored per-user Gateway token pair for a session after a
+    refresh (the Gateway rotates refresh tokens, so the new pair MUST be
+    persisted). Returns True if a session record was updated."""
+    if not isinstance(gateway, dict):
+        return False
+    token = _session_token_from_cookie_value(cookie_value)
+    if not token:
+        return False
+    with _SESSIONS_LOCK:
+        record = _sessions.get(token)
+        if not isinstance(record, dict):
+            return False
+        record['gateway'] = {
+            'access_token': gateway.get('access_token'),
+            'refresh_token': gateway.get('refresh_token'),
+            'profile_id': gateway.get('profile_id'),
+            'device_id': gateway.get('device_id'),
+        }
+        _sessions[token] = record
+        _save_sessions(_sessions)
+    return True
+
+
 def _prune_expired_sessions():
     """Remove all expired session entries to prevent unbounded memory growth."""
     now = time.time()

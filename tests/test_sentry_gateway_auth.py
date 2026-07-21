@@ -67,3 +67,19 @@ def test_unreachable_becomes_autherror(monkeypatch):
     monkeypatch.setattr(sga.urllib.request, "urlopen", _raise)
     with pytest.raises(sga.SentryAuthError):
         sga.refresh("http://gw", "r")
+
+
+def _mk_jwt(exp):
+    import base64
+    payload = base64.urlsafe_b64encode(json.dumps({"exp": exp}).encode()).decode().rstrip("=")
+    return f"header.{payload}.sig"
+
+
+def test_jwt_exp_reads_exp_without_verifying():
+    assert sga.jwt_exp(_mk_jwt(1234567890)) == 1234567890.0
+
+
+def test_jwt_exp_garbage_is_none():
+    assert sga.jwt_exp("not-a-jwt") is None
+    assert sga.jwt_exp(None) is None
+    assert sga.jwt_exp("a.b.c") is None

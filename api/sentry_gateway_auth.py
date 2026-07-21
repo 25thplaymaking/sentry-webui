@@ -13,9 +13,28 @@ Token pair shape: {access_token, refresh_token, device_id, profile_id}.
 
 from __future__ import annotations
 
+import base64
 import json
 import urllib.error
 import urllib.request
+
+
+def jwt_exp(token) -> float | None:
+    """Best-effort read of a JWT's ``exp`` claim (epoch seconds), WITHOUT
+    verifying the signature. Used only to decide when to proactively refresh;
+    the Gateway remains the authority on validity. Returns None if unreadable.
+    """
+    try:
+        parts = str(token).split(".")
+        if len(parts) < 2:
+            return None
+        payload = parts[1]
+        payload += "=" * (-len(payload) % 4)
+        claims = json.loads(base64.urlsafe_b64decode(payload.encode("utf-8")).decode("utf-8"))
+        exp = claims.get("exp")
+        return float(exp) if exp is not None else None
+    except Exception:
+        return None
 
 
 class SentryAuthError(Exception):
