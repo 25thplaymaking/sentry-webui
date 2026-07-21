@@ -481,7 +481,26 @@ def _remote_probe_wait_budget_s() -> float:
     module-level constant) so a test that monkeypatches the timeout or the path
     list gets a budget consistent with those values instead of a stale one.
     """
-    return _REMOTE_PROBE_TIMEOUT_S * len(_REMOTE_PROBE_PATHS) + 1.0
+    return _REMOTE_PROBE_TIMEOUT_S * len(_remote_probe_paths()) + 1.0
+
+
+def _remote_probe_paths() -> tuple[str, ...]:
+    """Health paths to try against the remote gateway, in order.
+
+    The Sentry Gateway exposes ``/health/ready`` and ``/health/live`` and NONE of
+    the Hermes paths — probing the Hermes set against it 404s three times and
+    reports a perfectly healthy gateway as "Hermes agent is not responding",
+    which is what users saw after the cutover. Returning a dialect-specific list
+    also avoids paying three dead round trips per probe.
+    """
+    try:
+        from api.gateway_chat import _gateway_dialect
+
+        if _gateway_dialect() == "sentry":
+            return ("/health/ready",)
+    except Exception:
+        pass
+    return _REMOTE_PROBE_PATHS
 
 
 def _remote_gateway_base_url() -> str | None:
@@ -586,7 +605,7 @@ def _run_remote_probe(base_url: str) -> dict[str, Any]:
     last_status: int | None = None
     last_error: str | None = None
     gateway_api_key = _remote_gateway_api_key()
-    for path in _REMOTE_PROBE_PATHS:
+    for path in _remote_probe_paths():
         probe_key = gateway_api_key if path == "/health/detailed" else None
         ok, status, err, body = _http_probe(
             base_url + path,

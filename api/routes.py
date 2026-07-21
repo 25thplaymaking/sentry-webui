@@ -11850,6 +11850,30 @@ def _handle_shutdown(handler) -> bool:
 
 def _handle_health_restart(handler) -> bool:
     """Restart the Hermes messaging gateway service."""
+    # Sentry dialect: there is no local Hermes in this container, so the old
+    # path raised FileNotFoundError: 'hermes' at the user. The runtime is a
+    # shared server-side service the Gateway owns; a browser client must not be
+    # able to bounce it for everyone. Refuse clearly instead of failing dirty.
+    try:
+        from api.gateway_chat import _gateway_dialect
+
+        _is_sentry = _gateway_dialect() == "sentry"
+    except Exception:
+        _is_sentry = False
+    if _is_sentry:
+        return j(
+            handler,
+            {
+                "ok": False,
+                "error": (
+                    "This deployment runs the agent as a managed server-side service, "
+                    "so it cannot be restarted from the browser. If the agent is "
+                    "genuinely down, an operator should restart it on the server."
+                ),
+            },
+            status=501,
+        )
+
     outcome = restart_active_profile_gateway()
 
     if outcome.get("status") == "completed":
