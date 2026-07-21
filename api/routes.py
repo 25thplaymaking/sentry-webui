@@ -16653,6 +16653,17 @@ def handle_post(handler, parsed) -> bool:
 
         if not _passkey_feature_flag_enabled():
             return j(handler, {"error": "Passkey support is disabled."}, status=404)
+        # Sentry dialect: a passkey cannot sign anyone in here (see
+        # /api/auth/passkey/login), so registering one only mints a credential
+        # that will always be refused — an invitation to lock yourself out of an
+        # account you believe you just secured.
+        if not _alternate_login_allowed():
+            return j(
+                handler,
+                {"error": "Passkey sign-in is disabled on this deployment. "
+                          "Use your enrollment code to sign in."},
+                status=403,
+            )
         ok, error, status = _require_passkey_registration_auth(handler)
         if not ok:
             return j(handler, {"error": error}, status=status)
@@ -16669,6 +16680,17 @@ def handle_post(handler, parsed) -> bool:
 
         if not _passkey_feature_flag_enabled():
             return j(handler, {"error": "Passkey support is disabled."}, status=404)
+        # Sentry dialect: a passkey cannot sign anyone in here (see
+        # /api/auth/passkey/login), so registering one only mints a credential
+        # that will always be refused — an invitation to lock yourself out of an
+        # account you believe you just secured.
+        if not _alternate_login_allowed():
+            return j(
+                handler,
+                {"error": "Passkey sign-in is disabled on this deployment. "
+                          "Use your enrollment code to sign in."},
+                status=403,
+            )
         ok, error, status = _require_passkey_registration_auth(handler)
         if not ok:
             return j(handler, {"error": error}, status=status)

@@ -253,7 +253,13 @@ def sentry_access_token_from_handler(handler):
             return None
         from http.cookies import SimpleCookie
 
-        from api.auth import COOKIE_NAME, get_session_info
+        # Resolve the cookie NAME rather than using the constant: a deployment
+        # may set HERMES_WEBUI_COOKIE_NAME (two WebUIs on one host). Reading the
+        # constant would find no cookie, and now that panels fail closed on a
+        # missing token that would 401 every panel for every user.
+        from api.auth import _resolve_cookie_name, get_session_info
+
+        COOKIE_NAME = _resolve_cookie_name()
 
         raw = handler.headers.get("Cookie", "") if getattr(handler, "headers", None) else ""
         if not raw:
