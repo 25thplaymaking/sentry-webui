@@ -5646,13 +5646,34 @@ def _handle_extension_sidecar_proxy(
 
 
 def _client_ip_for_rate_limit(handler) -> str:
-    try:
-        address = getattr(handler, "client_address", None)
-        if address:
-            return str(address[0])
-    except Exception:
-        pass
-    return "unknown"
+    """Return the bucket key for per-client rate limiting.
+
+    Behind a reverse proxy every request shares one socket peer, so keying on
+    the raw peer collapses every client on the internet into a SINGLE bucket:
+    one brute-forcer trips the limit and locks out every legitimate user, and
+    no attacker can be isolated. When the operator has opted in via
+    ``HERMES_WEBUI_TRUST_FORWARDED_FOR=1`` and the raw peer is a trusted proxy
+    (loopback or ``HERMES_WEBUI_TRUSTED_PROXY_CIDRS``), key on the forwarded
+    client instead.
+
+    Otherwise the raw socket peer stays authoritative — it cannot be spoofed by
+    a header, so a direct client cannot mint itself a fresh bucket by sending
+    ``X-Forwarded-For``. Same trust model as
+    :func:`_onboarding_request_is_local`.
+    """
+    if _truthy_env("HERMES_WEBUI_TRUST_FORWARDED_FOR") and _raw_peer_is_trusted_proxy(
+        handler
+    ):
+        forwarded = _forwarded_client_ip_from_trusted_proxy(handler)
+        if forwarded is None:
+            # Malformed/empty chain from a trusted proxy → fail closed into one
+            # shared bucket rather than handing out a fresh unthrottled key per
+            # malformed request (which would defeat the limit entirely).
+            return "forwarded-malformed"
+        if forwarded:
+            return forwarded
+    raw = _request_client_ip(handler)
+    return raw or "unknown"
 
 
 def _truthy_env(name: str) -> bool:
@@ -16556,7 +16577,9 @@ def handle_post(handler, parsed) -> bool:
 
         if not is_auth_enabled():
             return j(handler, {"ok": True, "message": "Auth not enabled"})
-        client_ip = handler.client_address[0]
+        # Proxy-aware: behind Cloudflare/nginx the raw peer is a constant, so
+        # keying the throttle on it would let one attacker lock out everyone.
+        client_ip = _client_ip_for_rate_limit(handler)
         if not _check_login_rate(client_ip):
             return j(
                 handler,
@@ -16745,7 +16768,8 @@ def handle_post(handler, parsed) -> bool:
             return bad(handler, _ALT_LOGIN_REFUSED_MSG.format(method="Passkey"), 403)
         if not is_auth_enabled():
             return j(handler, {"error": "Auth not enabled"}, status=400)
-        client_ip = handler.client_address[0]
+        # Proxy-aware — see the /api/auth/login call site.
+        client_ip = _client_ip_for_rate_limit(handler)
         if not _check_login_rate(client_ip):
             return j(handler, {"error": "Too many attempts. Try again in a minute."}, status=429)
         try:
