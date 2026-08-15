@@ -10043,6 +10043,15 @@ button:focus-visible{outline:2px solid var(--fs-hair-strong);outline-offset:2px}
   color:var(--fs-text);font-size:14px;font-weight:500;cursor:pointer;
   transition:background .16s var(--fs-ease)}
 .oidc-login:hover,.passkey-login:hover{background:color-mix(in srgb,var(--fs-text) 6%,transparent)}
+.forgot-password{display:block;width:auto;margin:12px auto 0;padding:3px 6px;border:0;
+  background:transparent;color:var(--fs-muted);font-size:12px;font-weight:500;text-decoration:underline;
+  text-underline-offset:3px}
+.forgot-password:hover{color:var(--fs-text);opacity:1}
+.recovery-note{font-size:12px;line-height:1.5;color:var(--fs-muted);text-align:left;margin:0 0 16px}
+.recovery-note a{display:inline-block;margin-top:6px;color:var(--fs-text);font-weight:600;text-underline-offset:3px}
+.recovery-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.recovery-actions .forgot-password{width:100%;margin:0;padding:10px;text-decoration:none;
+  border:1px solid var(--fs-hair-strong);border-radius:10px}
 .err{color:var(--fs-text);font-size:12px;margin-top:10px;display:none;
   border-left:2px solid var(--fs-hair-strong);padding-left:8px;text-align:left}
 @media (prefers-reduced-motion: reduce){*{transition:none!important;animation:none!important}}
@@ -10057,6 +10066,7 @@ button:focus-visible{outline:2px solid var(--fs-hair-strong);outline-offset:2px}
     {{SENTRY_ENROLL_HTML}}
     {{PASSWORD_INPUT_HTML}}
     <button type="submit">{{LOGIN_BTN}}</button>
+    {{SENTRY_RECOVERY_HTML}}
     {{PASSKEY_LOGIN_HTML}}
     {{OIDC_LOGIN_HTML}}
   </form>
@@ -10166,6 +10176,16 @@ def _sentry_enroll_html() -> str:
         '<input type="text" id="enroll-code" '
         'placeholder="Enrollment code (pair a device)" '
         'autocomplete="off" spellcheck="false">'
+    )
+
+
+def _sentry_recovery_html() -> str:
+    """Recovery is available only when identity belongs to the Sentry Gateway."""
+    if not _is_sentry_dialect():
+        return ""
+    return (
+        '<button type="button" id="forgot-password" class="forgot-password">'
+        'Forgot password?</button>'
     )
 
 
@@ -12194,6 +12214,7 @@ def handle_get(handler, parsed) -> bool:
             .replace("{{OIDC_LOGIN_HTML}}", _oidc_login_html(parsed))
             .replace("{{SENTRY_CREDENTIAL_HTML}}", _sentry_credential_html())
             .replace("{{SENTRY_ENROLL_HTML}}", _sentry_enroll_html())
+            .replace("{{SENTRY_RECOVERY_HTML}}", _sentry_recovery_html())
         )
         return t(handler, _page, content_type="text/html; charset=utf-8")
 
@@ -16702,6 +16723,31 @@ def handle_post(handler, parsed) -> bool:
         handler.end_headers()
         handler.wfile.write(body)
         return True
+
+    # ── Sentry per-user password recovery (POST) ──
+    if parsed.path == "/api/auth/password/recover":
+        try:
+            from api.gateway_chat import _gateway_dialect
+
+            _sentry_dialect = _gateway_dialect() == "sentry"
+        except Exception:
+            _sentry_dialect = False
+        if not _sentry_dialect:
+            return j(handler, {"error": "Not found"}, status=404)
+
+        from api.gateway_chat import _gateway_base_url
+        from api.sentry_gateway_auth import password_recover, SentryAuthError
+
+        try:
+            password_recover(
+                _gateway_base_url(),
+                str(body.get("username") or ""),
+                str(body.get("code") or ""),
+                str(body.get("new_password") or ""),
+            )
+        except SentryAuthError as exc:
+            return bad(handler, str(exc) or "Password recovery failed", exc.status or 400)
+        return j(handler, {"ok": True})
 
     # ── Sentry per-user password change (POST) ──
     if parsed.path == "/api/auth/password/change":

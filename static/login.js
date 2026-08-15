@@ -63,6 +63,7 @@ document.addEventListener('DOMContentLoaded', function () {
   // where every branch below is skipped and behaviour is unchanged.
   var userEl = document.getElementById('sentry-username');
   var userPwEl = document.getElementById('sentry-password');
+  var forgotBtn = document.getElementById('forgot-password');
 
   async function doLogin(e) {
     e.preventDefault();
@@ -110,7 +111,7 @@ document.addEventListener('DOMContentLoaded', function () {
   // sign-in reported must_change, so it can never be reached without a session.
   function showChangeForm() {
     hideErr();
-    [userEl, userPwEl, input, document.getElementById('enroll-code'),
+    [userEl, userPwEl, input, forgotBtn, document.getElementById('enroll-code'),
      document.getElementById('passkey-login'), document.getElementById('oidc-login')]
       .forEach(function (el) { if (el) el.style.display = 'none'; });
     var submit = form.querySelector('button[type="submit"]');
@@ -191,7 +192,130 @@ document.addEventListener('DOMContentLoaded', function () {
     });
   }
 
+  // Lost-password recovery is authorized in Server Control, then completed
+  // here so the new password never passes through the operations portal.
+  function showRecoveryForm() {
+    hideErr();
+    var original = Array.prototype.slice.call(form.children);
+    original.forEach(function (el) { el.style.display = 'none'; });
+
+    var note = document.createElement('p');
+    note.className = 'recovery-note';
+    note.textContent = 'In Server Control, open Settings → Sentry account recovery and create a one-time code. Then set your new password here.';
+    // The owner's desktop shell also forwards the loopback-only operations
+    // portal. Public/PWA clients cannot reach that private URL and instead ask
+    // their operator for a code.
+    var localHost = window.location.hostname === '[::1]' || window.location.hostname === '::1';
+    if (localHost) {
+      var controlLink = document.createElement('a');
+      controlLink.href = 'http://[::1]:17443/server-control/#settings';
+      controlLink.target = '_blank';
+      controlLink.rel = 'noreferrer';
+      controlLink.textContent = 'Open Server Control';
+      note.appendChild(document.createElement('br'));
+      note.appendChild(controlLink);
+    }
+    var recoveryUser = document.createElement('input');
+    recoveryUser.type = 'text';
+    recoveryUser.id = 'recovery-username';
+    recoveryUser.placeholder = 'Username';
+    recoveryUser.autocomplete = 'username';
+    recoveryUser.spellcheck = false;
+    recoveryUser.value = userEl ? userEl.value.trim() : '';
+    var recoveryCode = document.createElement('input');
+    recoveryCode.type = 'text';
+    recoveryCode.id = 'recovery-code';
+    recoveryCode.placeholder = 'One-time recovery code';
+    recoveryCode.autocomplete = 'one-time-code';
+    recoveryCode.spellcheck = false;
+    var next = document.createElement('input');
+    next.type = 'password';
+    next.id = 'recovery-new';
+    next.placeholder = 'New password (12+ characters)';
+    next.autocomplete = 'new-password';
+    var confirm = document.createElement('input');
+    confirm.type = 'password';
+    confirm.id = 'recovery-confirm';
+    confirm.placeholder = 'Repeat new password';
+    confirm.autocomplete = 'new-password';
+    var actions = document.createElement('div');
+    actions.className = 'recovery-actions';
+    var back = document.createElement('button');
+    back.type = 'button';
+    back.className = 'forgot-password';
+    back.textContent = 'Back to sign in';
+    var go = document.createElement('button');
+    go.type = 'button';
+    go.id = 'recovery-submit';
+    go.textContent = 'Reset password';
+    actions.appendChild(back);
+    actions.appendChild(go);
+
+    [note, recoveryUser, recoveryCode, next, confirm, actions]
+      .forEach(function (el) { form.appendChild(el); });
+    (recoveryUser.value ? recoveryCode : recoveryUser).focus();
+
+    function restoreSignIn() {
+      [note, recoveryUser, recoveryCode, next, confirm, actions]
+        .forEach(function (el) { el.remove(); });
+      original.forEach(function (el) { el.style.display = ''; });
+      if (userEl) userEl.focus();
+    }
+
+    async function submitRecovery() {
+      hideErr();
+      if (!recoveryUser.value.trim() || !recoveryCode.value.trim()) {
+        showErr('Enter your username and the one-time code from Server Control.');
+        return;
+      }
+      if (next.value.length < 12) {
+        showErr('New password must be at least 12 characters.');
+        return;
+      }
+      if (next.value !== confirm.value) {
+        showErr('The two new passwords do not match.');
+        return;
+      }
+      go.disabled = true;
+      try {
+        var res = await fetch('api/auth/password/recover', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            username: recoveryUser.value.trim(),
+            code: recoveryCode.value.trim(),
+            new_password: next.value,
+          }),
+          credentials: 'include',
+        });
+        var data = {};
+        try { data = await res.json(); } catch (_) {}
+        if (!res.ok || !data.ok) {
+          showErr(data.error || 'Could not reset the password.');
+          return;
+        }
+        if (userEl) userEl.value = recoveryUser.value.trim();
+        if (userPwEl) userPwEl.value = '';
+        restoreSignIn();
+        showErr('Password reset. Sign in with your new password.');
+      } catch (ex) {
+        showErr(connFailed);
+      } finally {
+        go.disabled = false;
+      }
+    }
+
+    back.addEventListener('click', restoreSignIn);
+    go.addEventListener('click', submitRecovery);
+    [recoveryUser, recoveryCode, next, confirm].forEach(function (el) {
+      el.addEventListener('keydown', function (ev) {
+        if (ev.key === 'Enter') { ev.preventDefault(); submitRecovery(); }
+      });
+    });
+  }
+
   form.addEventListener('submit', doLogin);
+  if (forgotBtn) forgotBtn.addEventListener('click', showRecoveryForm);
 
   function b64uToBytes(s) {
     s = String(s || '').replace(/-/g, '+').replace(/_/g, '/');

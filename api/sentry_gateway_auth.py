@@ -11,6 +11,8 @@ Endpoints (from the Gateway ``app/routes/auth.py``):
                                     pair + ``must_change`` (unauth)
     POST /api/auth/password/change  {current_password, new_password} -> 204
                                     (bearer-authenticated)
+    POST /api/auth/password/recover {username, code, new_password} -> 204
+                                    (single-use Server Control code)
     POST /api/auth/refresh          {refresh_token}      -> rotated token pair
 Token pair shape: {access_token, refresh_token, device_id, profile_id}.
 
@@ -146,6 +148,25 @@ def password_change(
         base_url, "/api/auth/password/change",
         {"current_password": current_password, "new_password": new_password},
         timeout=timeout, access_token=access_token,
+    )
+
+
+def password_recover(
+    base_url: str,
+    username: str,
+    code: str,
+    new_password: str,
+    *,
+    timeout: float = 15.0,
+) -> dict:
+    """Reset a locked-out account with a single-use code minted in Server
+    Control. The new secret travels directly from this form to the Gateway;
+    Server Control never receives it."""
+    return _post(
+        base_url,
+        "/api/auth/password/recover",
+        {"username": username, "code": code, "new_password": new_password},
+        timeout=timeout,
     )
 
 
