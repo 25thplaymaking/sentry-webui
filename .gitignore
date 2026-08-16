@@ -77,3 +77,7 @@ graphify-out/
 node_modules/
 package-lock.json
 docs/ui-ux/review-shots/
+# Added by code-review-graph
+.code-review-graph/
+# Local Claude Code MCP wiring: contains this machine's absolute paths.
+.mcp.json

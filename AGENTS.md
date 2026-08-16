@@ -103,6 +103,16 @@ compressed form:
     mainstream chat apps put the equivalent, not by where your diff already is; verify with
     before/after images at desktop and narrow widths.
 
+**How to run those tests: one process at a time, and only one.** This suite takes over twenty
+minutes and this is a Windows desktop that is in use. Run a single consolidated `pytest` over the
+affected area, or the whole suite once, with output redirected to a file you then read
+(`--tb=no -ra` gives a usable failure list without pages of tracebacks). A run that long may be
+backgrounded -- but then it is the only one running, and you wait for it instead of starting
+anything alongside it. Never fan out a run per file or per aspect of the change, and never leave an
+abandoned run alive while starting its replacement. Concurrent runs here saturate the CPU, steal
+window focus, and soft-lock the machine. If a run is too slow, narrow its selection rather than
+parallelizing it.
+
 Show the work in the PR body: the siblings you found, proof the test failed before the fix, the
 verification run, before/after images for visible changes, and an explicit list of what you could
 not verify.
