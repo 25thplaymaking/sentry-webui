@@ -455,6 +455,39 @@ def _pytest_session_safe_execv(_exe, _args):  # pragma: no cover — never calle
 
 os.execv = _pytest_session_safe_execv
 
+# ── Companion os._exit guard (the Windows half of the same hazard) ─────────
+# The execv guard above only covers the POSIX branch of _schedule_restart().
+# Its Windows branch does not re-exec at all — it spawns a detached
+# subprocess.Popen() and then calls ``os._exit(0)`` to free the listening port
+# (api/updates.py). Its ``except Exception`` fallback calls ``os._exit(0)`` too.
+#
+# ``os._exit`` from a daemon thread terminates the whole interpreter
+# immediately: no atexit handlers, no flush of buffered stdout, and an exit
+# status of 0. For pytest that means the run dies partway through and reports
+# SUCCESS, with the summary still sitting unflushed in the stdout buffer. On
+# this checkout it killed the suite at ~93% on every attempt, which is why the
+# WebUI suite has never printed a summary here and why a cluster of real
+# failures went unread for so long — the run looked truncated by the terminal
+# rather than killed from the inside.
+#
+# A forked child must still be able to exit for real: tests/
+# test_terminal_zombie_reaper.py forks and calls os._exit(0) in the child, and
+# neutering that would drop the child back into the collector to run the rest
+# of the suite a second time. Comparing pids distinguishes the two cases
+# exactly.
+_real_os_exit = os._exit
+_pytest_session_pid = os.getpid()
+
+def _pytest_session_safe_exit(status):  # pragma: no cover — never called in prod
+    if os.getpid() != _pytest_session_pid:
+        # A forked child. Let it go.
+        _real_os_exit(status)
+    # The pytest process itself. A late-firing daemon thread from
+    # _schedule_restart() must not be able to kill the run.
+    return None
+
+os._exit = _pytest_session_safe_exit
+
 # ── Hermetic network isolation ─────────────────────────────────────────────
 # Tests must not reach the public internet. Outbound to Anthropic / OpenAI /
 # Amazon / OpenRouter / etc. is forbidden by default. The test suite already
