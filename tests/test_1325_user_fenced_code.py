@@ -8,7 +8,7 @@ UI_JS = os.path.join(os.path.dirname(__file__), '..', 'static', 'ui.js')
 
 def _extract_js_functions():
     """Extract esc, fence helpers, and _renderUserFencedBlocks from ui.js."""
-    src = open(UI_JS).read()
+    src = open(UI_JS, encoding='utf-8').read()
 
     def extract_function(name):
         start = src.find(f"function {name}(")
