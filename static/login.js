@@ -238,6 +238,27 @@ document.addEventListener('DOMContentLoaded', function () {
     confirm.id = 'recovery-confirm';
     confirm.placeholder = 'Repeat new password';
     confirm.autocomplete = 'new-password';
+    // Second door: an identity provider the operator can still get into. Shown
+    // only when the Gateway reports one is configured, so a deployment without
+    // one looks exactly as it did before.
+    var providerBtn = document.createElement('button');
+    providerBtn.type = 'button';
+    providerBtn.className = 'button button--text';
+    providerBtn.style.display = 'none';
+    providerBtn.textContent = 'Reset with your identity provider';
+    providerBtn.addEventListener('click', function () {
+      providerBtn.disabled = true;
+      window.location.assign('api/auth/sentry/oidc/start');
+    });
+    fetch('api/auth/sentry/oidc/status', { credentials: 'include' })
+      .then(function (res) { return res.ok ? res.json() : null; })
+      .then(function (data) {
+        if (!data || !data.available) return;
+        providerBtn.textContent = 'Reset with ' + (data.display_name || 'your identity provider');
+        providerBtn.style.display = '';
+      })
+      .catch(function () { /* No provider, no button. */ });
+
     var actions = document.createElement('div');
     actions.className = 'recovery-actions';
     var back = document.createElement('button');
@@ -251,12 +272,12 @@ document.addEventListener('DOMContentLoaded', function () {
     actions.appendChild(back);
     actions.appendChild(go);
 
-    [note, recoveryUser, recoveryCode, next, confirm, actions]
+    [note, recoveryUser, recoveryCode, next, confirm, providerBtn, actions]
       .forEach(function (el) { form.appendChild(el); });
     (recoveryUser.value ? recoveryCode : recoveryUser).focus();
 
     function restoreSignIn() {
-      [note, recoveryUser, recoveryCode, next, confirm, actions]
+      [note, recoveryUser, recoveryCode, next, confirm, providerBtn, actions]
         .forEach(function (el) { el.remove(); });
       original.forEach(function (el) { el.style.display = ''; });
       if (userEl) userEl.focus();
@@ -314,8 +335,112 @@ document.addEventListener('DOMContentLoaded', function () {
     });
   }
 
+  // Returned from the identity provider. The recovery code the Gateway minted
+  // is held server-side against an HttpOnly ticket cookie -- it deliberately
+  // never reaches this script -- so all this form collects is the new password.
+  function showProviderRecoveryForm() {
+    hideErr();
+    var original = Array.prototype.slice.call(form.children);
+    original.forEach(function (el) { el.style.display = 'none'; });
+
+    var note = document.createElement('p');
+    note.className = 'recovery-note';
+    note.textContent = 'Your identity provider verified you. Choose a new password.';
+
+    var next = document.createElement('input');
+    next.type = 'password';
+    next.id = 'provider-recovery-new';
+    next.placeholder = 'New password (12+ characters)';
+    next.autocomplete = 'new-password';
+    var confirm = document.createElement('input');
+    confirm.type = 'password';
+    confirm.id = 'provider-recovery-confirm';
+    confirm.placeholder = 'Repeat new password';
+    confirm.autocomplete = 'new-password';
+
+    var actions = document.createElement('div');
+    actions.className = 'recovery-actions';
+    var back = document.createElement('button');
+    back.type = 'button';
+    back.className = 'forgot-password';
+    back.textContent = 'Back to sign in';
+    var go = document.createElement('button');
+    go.type = 'button';
+    go.id = 'provider-recovery-submit';
+    go.textContent = 'Reset password';
+    actions.appendChild(back);
+    actions.appendChild(go);
+
+    [note, next, confirm, actions].forEach(function (el) { form.appendChild(el); });
+    next.focus();
+
+    function restoreSignIn() {
+      [note, next, confirm, actions].forEach(function (el) { el.remove(); });
+      original.forEach(function (el) { el.style.display = ''; });
+      if (userEl) userEl.focus();
+    }
+
+    async function submitProviderRecovery() {
+      hideErr();
+      if (next.value.length < 12) {
+        showErr('New password must be at least 12 characters.');
+        return;
+      }
+      if (next.value !== confirm.value) {
+        showErr('The two new passwords do not match.');
+        return;
+      }
+      go.disabled = true;
+      try {
+        var res = await fetch('api/auth/sentry/oidc/complete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ new_password: next.value }),
+          credentials: 'include',
+        });
+        var data = {};
+        try { data = await res.json(); } catch (_) {}
+        if (!res.ok || !data.ok) {
+          showErr(data.error || 'Could not reset the password.');
+          return;
+        }
+        if (userEl && data.username) userEl.value = data.username;
+        if (userPwEl) userPwEl.value = '';
+        restoreSignIn();
+        showErr('Password reset. Sign in with your new password.');
+      } catch (ex) {
+        showErr(connFailed);
+      } finally {
+        go.disabled = false;
+      }
+    }
+
+    back.addEventListener('click', restoreSignIn);
+    go.addEventListener('click', submitProviderRecovery);
+    [next, confirm].forEach(function (el) {
+      el.addEventListener('keydown', function (ev) {
+        if (ev.key === 'Enter') { ev.preventDefault(); submitProviderRecovery(); }
+      });
+    });
+  }
+
   form.addEventListener('submit', doLogin);
   if (forgotBtn) forgotBtn.addEventListener('click', showRecoveryForm);
+
+  // The provider callback is a server-side redirect, so it reports its outcome
+  // through the fragment. Read it once and strip it, so a refresh does not
+  // re-enter a recovery whose ticket has already been spent.
+  (function handleProviderReturn() {
+    var hash = window.location.hash;
+    if (hash !== '#recovery-provider' && hash !== '#recovery-provider-failed') return;
+    history.replaceState(null, '', window.location.pathname + window.location.search);
+    if (hash === '#recovery-provider') {
+      showProviderRecoveryForm();
+    } else {
+      showRecoveryForm();
+      showErr('That sign-in could not be verified for recovery. Use a Server Control code instead.');
+    }
+  })();
 
   function b64uToBytes(s) {
     s = String(s || '').replace(/-/g, '+').replace(/_/g, '/');

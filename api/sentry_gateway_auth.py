@@ -13,6 +13,11 @@ Endpoints (from the Gateway ``app/routes/auth.py``):
                                     (bearer-authenticated)
     POST /api/auth/password/recover {username, code, new_password} -> 204
                                     (single-use Server Control code)
+    GET  /api/auth/oidc/recovery/status                  -> {available, display_name}
+    POST /api/auth/oidc/recovery/start     {}            -> {authorization_url,
+                                    flow_token} (unauth; identity-provider door)
+    POST /api/auth/oidc/recovery/callback  {code, state, flow_token}
+                                    -> {username, code, expires_at} (unauth)
     POST /api/auth/refresh          {refresh_token}      -> rotated token pair
 Token pair shape: {access_token, refresh_token, device_id, profile_id}.
 
@@ -166,6 +171,69 @@ def password_recover(
         base_url,
         "/api/auth/password/recover",
         {"username": username, "code": code, "new_password": new_password},
+        timeout=timeout,
+    )
+
+
+def _get(base_url: str, path: str, *, timeout: float = 10.0) -> dict:
+    url = f"{base_url.rstrip('/')}{path}"
+    req = urllib.request.Request(url, headers={"Accept": "application/json"}, method="GET")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read().decode("utf-8").strip()
+    except urllib.error.HTTPError as exc:
+        raise SentryAuthError(_read_detail(exc), status=exc.code) from exc
+    except urllib.error.URLError as exc:
+        raise SentryAuthError(f"gateway unreachable: {exc.reason}") from exc
+    try:
+        parsed = json.loads(raw) if raw else {}
+    except ValueError as exc:
+        raise SentryAuthError("gateway returned an unexpected response") from exc
+    if not isinstance(parsed, dict):
+        raise SentryAuthError("gateway returned an unexpected response")
+    return parsed
+
+
+def oidc_recovery_status(base_url: str, *, timeout: float = 5.0) -> dict:
+    """Whether the Gateway has a usable identity provider configured.
+
+    Read on the sign-in page, so it is kept side-effect free and given a short
+    timeout: a slow or absent Gateway must not hold up the login form.
+    """
+    return _get(base_url, "/api/auth/oidc/recovery/status", timeout=timeout)
+
+
+def oidc_recovery_start(base_url: str, *, timeout: float = 15.0) -> dict:
+    """Begin an identity-provider recovery.
+
+    Returns ``{authorization_url, flow_token}``. The flow token is opaque here on
+    purpose -- it is signed by the Gateway and carries the PKCE verifier across
+    the redirect. This fork stores it in a cookie and hands it straight back;
+    it neither reads nor forges it, and the provider client secret stays on the
+    Gateway. Raises ``SentryAuthError`` (404) when no provider is configured.
+    """
+    return _post(base_url, "/api/auth/oidc/recovery/start", {}, timeout=timeout)
+
+
+def oidc_recovery_callback(
+    base_url: str,
+    code: str,
+    state: str,
+    flow_token: str,
+    *,
+    timeout: float = 20.0,
+) -> dict:
+    """Finish an identity-provider recovery.
+
+    Returns ``{username, code, expires_at}`` -- the same single-use recovery code
+    Server Control mints, so the password itself is still set through the
+    unchanged ``password_recover`` path below. Raises ``SentryAuthError`` (401)
+    with one message for every failure reason.
+    """
+    return _post(
+        base_url,
+        "/api/auth/oidc/recovery/callback",
+        {"code": code, "state": state, "flow_token": flow_token},
         timeout=timeout,
     )
 

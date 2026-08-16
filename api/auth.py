@@ -53,6 +53,18 @@ PUBLIC_PATHS = frozenset({
     '/api/auth/login', '/api/auth/status',
     '/api/auth/oidc/start', '/api/auth/oidc/callback',
     '/api/auth/passkey/options', '/api/auth/passkey/login',
+    # Account recovery. Every step runs signed out by definition -- being locked
+    # out is the reason someone is here. Omitting these made check_auth() answer
+    # 401 before the handler ran, so the "Forgot password?" door on the login
+    # screen could not actually be opened by the only people who need it. The
+    # existing recovery tests call handle_post() directly, which is why the gate
+    # was never exercised; see test_sentry_recovery_paths_are_public.
+    #
+    # /api/auth/password/change stays private on purpose: changing a password
+    # from Settings requires the session it is changing.
+    '/api/auth/password/recover',
+    '/api/auth/sentry/oidc/status', '/api/auth/sentry/oidc/start',
+    '/api/auth/sentry/oidc/callback', '/api/auth/sentry/oidc/complete',
     '/share',
     '/manifest.json', '/manifest.webmanifest',
     '/session/manifest.json', '/session/manifest.webmanifest',

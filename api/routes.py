@@ -12218,6 +12218,121 @@ def handle_get(handler, parsed) -> bool:
         )
         return t(handler, _page, content_type="text/html; charset=utf-8")
 
+    # ── Sentry identity-provider recovery (GET) ──
+    #
+    # A second door to the same single-use recovery code Server Control mints,
+    # so a portal lockout no longer takes Sentry down with it. This fork only
+    # proxies: the provider client secret and the code exchange stay on the
+    # Gateway, and the minted code is never handed to the browser.
+    if parsed.path.startswith("/api/auth/sentry/oidc/"):
+        try:
+            from api.gateway_chat import _gateway_dialect
+
+            _sentry_dialect = _gateway_dialect() == "sentry"
+        except Exception:
+            _sentry_dialect = False
+        if not _sentry_dialect:
+            return j(handler, {"error": "Not found"}, status=404)
+
+        from api.gateway_chat import _gateway_base_url
+        from api.sentry_gateway_auth import (
+            SentryAuthError,
+            oidc_recovery_callback,
+            oidc_recovery_start,
+            oidc_recovery_status,
+        )
+        from api.sentry_oidc_recovery import (
+            FLOW_COOKIE,
+            TICKET_COOKIE,
+            clear_cookie_header,
+            issue_ticket,
+            read_cookie,
+            set_cookie_header,
+        )
+
+        try:
+            from api.auth import _is_secure_context
+
+            _secure = bool(_is_secure_context(handler))
+        except Exception:
+            _secure = False
+
+        def _recovery_redirect(fragment, cookie_headers):
+            handler.send_response(302)
+            handler.send_header("Location", "/login" + fragment)
+            handler.send_header("Cache-Control", "no-store")
+            handler.send_header("Content-Length", "0")
+            for header in cookie_headers:
+                handler.send_header("Set-Cookie", header)
+            _security_headers(handler)
+            handler.end_headers()
+            return True
+
+        if parsed.path == "/api/auth/sentry/oidc/status":
+            try:
+                status_payload = oidc_recovery_status(_gateway_base_url())
+            except SentryAuthError:
+                # A Gateway that is down and one with no provider configured are
+                # the same answer here: do not offer a button that cannot work.
+                return j(handler, {"available": False, "display_name": ""})
+            return j(handler, {
+                "available": bool(status_payload.get("available")),
+                "display_name": str(status_payload.get("display_name") or "your provider"),
+            })
+
+        if parsed.path == "/api/auth/sentry/oidc/start":
+            try:
+                started = oidc_recovery_start(_gateway_base_url())
+            except SentryAuthError as exc:
+                return bad(handler, str(exc) or "Recovery is unavailable", exc.status or 502)
+            location = str(started.get("authorization_url") or "")
+            flow_token = str(started.get("flow_token") or "")
+            # Refuse to bounce the browser anywhere the Gateway did not name as
+            # an https provider endpoint.
+            if not location.startswith("https://") or not flow_token:
+                return bad(handler, "Recovery is unavailable", 502)
+            handler.send_response(302)
+            handler.send_header("Location", location)
+            handler.send_header("Cache-Control", "no-store")
+            handler.send_header("Content-Length", "0")
+            handler.send_header(
+                "Set-Cookie", set_cookie_header(FLOW_COOKIE, flow_token, secure=_secure)
+            )
+            _security_headers(handler)
+            handler.end_headers()
+            return True
+
+        if parsed.path == "/api/auth/sentry/oidc/callback":
+            query = parse_qs(parsed.query or "")
+            code = (query.get("code") or [""])[0]
+            state = (query.get("state") or [""])[0]
+            flow_token = read_cookie(handler, FLOW_COOKIE)
+            # The flow cookie is spent whatever happens next, so a replayed
+            # callback cannot get a second exchange out of the same verifier.
+            cookies = [clear_cookie_header(FLOW_COOKIE)]
+            if not code or not state or not flow_token:
+                return _recovery_redirect("#recovery-provider-failed", cookies)
+            try:
+                result = oidc_recovery_callback(
+                    _gateway_base_url(), code, state, flow_token
+                )
+            except SentryAuthError:
+                return _recovery_redirect("#recovery-provider-failed", cookies)
+
+            username = str(result.get("username") or "")
+            recovery_code = str(result.get("code") or "")
+            if not username or not recovery_code:
+                return _recovery_redirect("#recovery-provider-failed", cookies)
+
+            # The code stays here, against a ticket. Putting it in the redirect
+            # fragment instead would write a live credential into browser history.
+            cookies.append(
+                set_cookie_header(TICKET_COOKIE, issue_ticket(username, recovery_code), secure=_secure)
+            )
+            return _recovery_redirect("#recovery-provider", cookies)
+
+        return j(handler, {"error": "Not found"}, status=404)
+
     if parsed.path == "/api/auth/oidc/start":
         from api.auth_oidc import OIDCAuthError, OIDCConfigError, build_authorization_redirect
 
@@ -16723,6 +16838,56 @@ def handle_post(handler, parsed) -> bool:
         handler.end_headers()
         handler.wfile.write(body)
         return True
+
+    # ── Sentry identity-provider recovery: set the new password (POST) ──
+    #
+    # The recovery code minted by the provider round trip is held server-side
+    # against the ticket cookie, so only the new password crosses the wire here.
+    # It is spent through the same unchanged Gateway call Server Control's flow
+    # uses; nothing about how a password is set has moved.
+    if parsed.path == "/api/auth/sentry/oidc/complete":
+        try:
+            from api.gateway_chat import _gateway_dialect
+
+            _sentry_dialect = _gateway_dialect() == "sentry"
+        except Exception:
+            _sentry_dialect = False
+        if not _sentry_dialect:
+            return j(handler, {"error": "Not found"}, status=404)
+
+        from api.gateway_chat import _gateway_base_url
+        from api.sentry_gateway_auth import SentryAuthError, password_recover
+        from api.sentry_oidc_recovery import (
+            TICKET_COOKIE,
+            clear_cookie_header,
+            consume_ticket,
+            read_cookie,
+        )
+
+        redeemed = consume_ticket(read_cookie(handler, TICKET_COOKIE))
+        pending = getattr(handler, "_pending_set_cookies", None)
+        if pending is None:
+            pending = []
+            handler._pending_set_cookies = pending
+        pending.append(clear_cookie_header(TICKET_COOKIE))
+
+        if redeemed is None:
+            return bad(
+                handler,
+                "That recovery has expired or was already used. Start it again.",
+                401,
+            )
+        username, recovery_code = redeemed
+        try:
+            password_recover(
+                _gateway_base_url(),
+                username,
+                recovery_code,
+                str(body.get("new_password") or ""),
+            )
+        except SentryAuthError as exc:
+            return bad(handler, str(exc) or "Password recovery failed", exc.status or 400)
+        return j(handler, {"ok": True, "username": username})
 
     # ── Sentry per-user password recovery (POST) ──
     if parsed.path == "/api/auth/password/recover":
