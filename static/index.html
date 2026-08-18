@@ -192,6 +192,7 @@
     <button class="rail-btn nav-tab dashboard-link has-tooltip" id="dashboardRailBtn" data-dashboard-link style="display:none" onclick="openHermesDashboard(event)" data-tooltip="Hermes Dashboard" data-i18n-title="tab_dashboard" aria-label="Hermes Dashboard"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/></svg><span class="dashboard-external-badge" aria-hidden="true"></span></button>
     <button class="rail-btn nav-tab has-tooltip" data-panel="logs" onclick="switchPanel('logs',{fromRailClick:true})" data-tooltip="Logs" data-i18n-title="tab_logs" aria-label="Logs"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8"/><path d="M8 17h8"/><path d="M8 9h2"/></svg></button>
     <div class="rail-spacer"></div>
+    <button class="rail-btn nav-tab has-tooltip" data-panel="agentadmin" onclick="switchPanel('agentadmin',{fromRailClick:true})" data-tooltip="Agent" data-i18n-title="tab_agent" aria-label="Agent"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 12l2 2 4-4"/><path d="M12 3a9 9 0 1 0 9 9"/><path d="M21 3v6h-6"/></svg></button>
     <button class="rail-btn nav-tab has-tooltip" data-panel="settings" onclick="switchPanel('settings',{fromRailClick:true})" data-tooltip="Settings" data-i18n-title="tab_settings" aria-label="Settings"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg><span class="auth-warning-badge" id="authWarningBadgeDesktop" style="display:none;position:absolute;top:4px;right:4px;width:8px;height:8px;border-radius:50%;background:#e05"></span></button>
   </nav>
   <aside class="sidebar">
@@ -211,6 +212,7 @@
       <button class="nav-tab dashboard-link has-tooltip has-tooltip--bottom" id="dashboardMobileBtn" data-dashboard-link data-label="Dashboard" style="display:none" onclick="openHermesDashboard(event)" data-tooltip="Hermes Dashboard" data-i18n-title="tab_dashboard"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/></svg><span class="dashboard-external-badge" aria-hidden="true"></span></button>
       <button class="nav-tab has-tooltip has-tooltip--bottom" data-panel="logs" data-label="Logs" onclick="switchPanel('logs',{fromRailClick:true})" data-tooltip="Logs" data-i18n-title="tab_logs"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8"/><path d="M8 17h8"/><path d="M8 9h2"/></svg></button>
       <!-- Settings button mirrored here for mobile (rail is desktop-only via @media >=768px). Keep in sync with rail entry. -->
+      <button class="nav-tab has-tooltip has-tooltip--bottom" data-panel="agentadmin" data-label="Agent" onclick="switchPanel('agentadmin',{fromRailClick:true})" data-tooltip="Agent" data-i18n-title="tab_agent"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 12l2 2 4-4"/><path d="M12 3a9 9 0 1 0 9 9"/><path d="M21 3v6h-6"/></svg></button>
       <button class="nav-tab has-tooltip has-tooltip--bottom" data-panel="settings" onclick="switchPanel('settings',{fromRailClick:true})" data-tooltip="Settings" data-i18n-title="tab_settings" style="position:relative"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg><span class="auth-warning-badge" id="authWarningBadgeMobile" style="display:none;position:absolute;top:4px;right:4px;width:8px;height:8px;border-radius:50%;background:#e05"></span></button>
     </div>
     <!-- Flash-prevention: apply hidden tab visibility from localStorage synchronously
@@ -290,6 +292,30 @@
         <span data-i18n="personal_memory">Personal memory</span>
       </div>
       <div class="side-menu" id="memoryPanel"><div style="padding:12px;color:var(--muted);font-size:12px" data-i18n="loading">Loading...</div></div>
+    </div>
+    <!-- Agent panel: the agent's own review queue and provider credentials.
+         Both live inside Hermes and reach us through the Sentry Gateway. -->
+    <div class="panel-view" id="panelAgentadmin">
+      <div class="panel-head">
+        <span data-i18n="tab_agent">Agent</span>
+        <div class="panel-head-actions">
+          <button class="panel-head-btn has-tooltip has-tooltip--bottom" onclick="loadAgentAdmin()" data-tooltip="Refresh" aria-label="Refresh"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg></button>
+        </div>
+      </div>
+      <div style="flex:1;overflow-y:auto;padding:8px 12px">
+        <div style="font-size:12px;font-weight:600;margin:4px 0 2px">Review queue</div>
+        <div style="font-size:11px;color:var(--muted);margin-bottom:8px">
+          Writes the agent proposed to its own memory and skills. Nothing is applied until you approve it.
+        </div>
+        <div id="agentAdminPending"></div>
+
+        <div style="font-size:12px;font-weight:600;margin:18px 0 2px">Subscriptions &amp; credentials</div>
+        <div style="font-size:11px;color:var(--muted);margin-bottom:8px">
+          Provider accounts the agent can run through. Connecting one here stores it in the agent's own credential store.
+        </div>
+        <div id="agentAdminOAuthBox" style="display:none;padding:12px;border:1px solid var(--border);border-radius:8px;margin-bottom:8px"></div>
+        <div id="agentAdminProviders"></div>
+      </div>
     </div>
     <!-- Todo panel -->
     <div class="panel-view" id="panelTodos">
@@ -1793,6 +1819,7 @@
 <script src="static/commands.js?v=__WEBUI_VERSION__" defer></script>
 <script src="static/messages.js?v=__WEBUI_VERSION__" defer></script>
 <script src="static/extension_settings.js?v=__WEBUI_VERSION__" defer></script>
+<script src="static/agent_admin.js?v=__WEBUI_VERSION__" defer></script>
 <script src="static/panels.js?v=__WEBUI_VERSION__" defer></script>
 <script src="static/onboarding.js?v=__WEBUI_VERSION__" defer></script>
 <script src="static/boot.js?v=__WEBUI_VERSION__" defer></script>

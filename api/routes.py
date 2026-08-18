@@ -12645,6 +12645,30 @@ def handle_get(handler, parsed) -> bool:
         j(handler, build_system_health_payload())
         return True
 
+    # The agent's own pending writes and credentials. Sentry-only: both live
+    # inside Hermes, which this container never loads, so there is no local
+    # implementation to fall back to -- an honest "unavailable" is the correct
+    # answer off-dialect rather than a different subsystem's data.
+    if parsed.path.startswith("/api/agent/"):
+        from api.gateway_chat import _gateway_dialect
+
+        if _gateway_dialect() != "sentry":
+            return j(handler, {
+                "available": False,
+                "error": "the agent admin surface requires the Sentry gateway dialect",
+                "status": 501, "items": [], "providers": [],
+            }, status=501)
+
+        from api import sentry_agent_admin
+
+        if parsed.path == "/api/agent/auth/providers":
+            return j(handler, sentry_agent_admin.auth_providers(handler))
+        if parsed.path.startswith("/api/agent/pending/"):
+            _sub = parsed.path[len("/api/agent/pending/"):].strip("/")
+            if _sub and "/" not in _sub:
+                return j(handler, sentry_agent_admin.pending_list(handler, _sub))
+        return bad(handler, f"unknown agent admin route: {parsed.path}", status=404)
+
     if parsed.path == "/api/models":
         # Sentry dialect: the reachable-model registry lives in the Gateway, not
         # in this container. get_available_models() below discovers by reading
@@ -14328,6 +14352,37 @@ def handle_post(handler, parsed) -> bool:
         if diag:
             diag.finish()
         return proxy_result
+
+    # Agent admin mutations: approve/reject a staged write, or drive an OAuth
+    # login. Placed after the CSRF gate above -- these are state-changing and
+    # must never be reachable cross-origin.
+    if parsed.path.startswith("/api/agent/"):
+        from api.gateway_chat import _gateway_dialect
+
+        if _gateway_dialect() != "sentry":
+            return j(handler, {
+                "available": False,
+                "error": "the agent admin surface requires the Sentry gateway dialect",
+                "status": 501,
+            }, status=501)
+
+        from api import sentry_agent_admin
+
+        try:
+            _agent_body = read_body(handler) or {}
+        except ValueError as exc:
+            return bad(handler, str(exc))
+        if parsed.path == "/api/agent/auth/oauth/start":
+            return j(handler, sentry_agent_admin.auth_oauth_start(handler, _agent_body))
+        if parsed.path == "/api/agent/auth/oauth/complete":
+            return j(handler, sentry_agent_admin.auth_oauth_complete(handler, _agent_body))
+        if parsed.path.startswith("/api/agent/pending/"):
+            _rest = parsed.path[len("/api/agent/pending/"):].strip("/").split("/")
+            if len(_rest) == 3:
+                _sub, _pid, _decision = _rest
+                return j(handler, sentry_agent_admin.pending_decide(
+                    handler, _sub, _pid, _decision))
+        return bad(handler, f"unknown agent admin route: {parsed.path}", status=404)
 
     if parsed.path == "/api/shutdown":
         return _handle_shutdown(handler)
@@ -17157,6 +17212,22 @@ def handle_delete(handler, parsed) -> bool:
     body = read_body(handler)
     if not _guard_request_session_visibility(handler, parsed, body=body, method="DELETE"):
         return True
+    if parsed.path.startswith("/api/agent/auth/providers/"):
+        from api.gateway_chat import _gateway_dialect
+
+        if _gateway_dialect() != "sentry":
+            return j(handler, {
+                "available": False,
+                "error": "the agent admin surface requires the Sentry gateway dialect",
+                "status": 501,
+            }, status=501)
+
+        from api import sentry_agent_admin
+
+        _provider = parsed.path[len("/api/agent/auth/providers/"):].strip("/")
+        return j(handler, sentry_agent_admin.auth_logout(
+            handler, _provider, parsed.query or ""))
+
     if parsed.path.startswith("/api/mcp/servers/"):
         name = parsed.path[len("/api/mcp/servers/"):]
         return _handle_mcp_server_delete(handler, name)
