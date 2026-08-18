@@ -346,6 +346,7 @@ def _run_sentry_turn_streaming(
     cancel_event,
     quoted_context=None,
     timeout=None,
+    model=None,
 ):
     """Bridge one WebUI turn through the Sentry Gateway ``/api/chat/turn``.
 
@@ -363,6 +364,12 @@ def _run_sentry_turn_streaming(
     body: dict[str, Any] = {"prompt": str(msg_text or ""), "session_id": session_id}
     if quoted_context:
         body["quoted_context"] = list(quoted_context)
+    # Only sent when the user actually picked one. Omitting the key keeps the
+    # profile's configured default, and the Gateway REFUSES a model this profile
+    # does not advertise rather than quietly substituting one -- so a stale
+    # picker surfaces as a visible error instead of an answer from elsewhere.
+    if model:
+        body["model"] = str(model)
     req = urllib.request.Request(
         url, data=json.dumps(body).encode("utf-8"), headers=headers, method="POST"
     )
@@ -1042,6 +1049,7 @@ def _run_gateway_chat_streaming(
                     _sentry_turn_token(session_id, gateway_token),
                     put_gateway_event=put_gateway_event,
                     cancel_event=cancel_event,
+                    model=model,
                 )
             except Exception as exc:
                 error_payload = _settle_gateway_terminal_error(

@@ -10219,6 +10219,32 @@ _ALT_LOGIN_REFUSED_MSG = (
 )
 
 
+def _sentry_models_envelope(model_ids, *, unavailable: bool = False) -> dict:
+    """Shape the Gateway's flat alias list into the picker's envelope.
+
+    The picker reads ``groups: [{provider, provider_id, models: [{id,label}]}]``.
+    Aliases are already the operator-facing names configured in Hermes'
+    model_routes, so they are used verbatim as both id and label -- inventing
+    prettier labels here would put a second naming scheme between what the
+    operator configured and what the user picks.
+
+    An empty list yields NO groups on purpose. Emitting a placeholder group
+    would put unreachable options back in the menu, which is the whole defect
+    this path replaced.
+    """
+    models = [{"id": mid, "label": mid} for mid in model_ids]
+    groups = [{"provider": "Sentry", "provider_id": "sentry", "models": models}] if models else []
+    return {
+        "active_provider": "sentry" if models else None,
+        # The Gateway decides the effective default from the profile's own
+        # config; the picker must not assert one the agent has not confirmed.
+        "default_model": "",
+        "groups": groups,
+        "configured_model_badges": {},
+        "models_unavailable": bool(unavailable),
+    }
+
+
 def _sentry_no_identity(handler):
     """401 a sentry-dialect request that carries no per-user Gateway token.
 
@@ -12535,6 +12561,30 @@ def handle_get(handler, parsed) -> bool:
         return True
 
     if parsed.path == "/api/models":
+        # Sentry dialect: the reachable-model registry lives in the Gateway, not
+        # in this container. get_available_models() below discovers by reading
+        # the AGENT's config.yaml, which this container deliberately does not
+        # mount -- so it would fall through to a hardcoded provider catalogue and
+        # offer models that cannot answer while hiding the one that can. Ask the
+        # Gateway instead; it reports exactly what this profile can route to.
+        from api.gateway_chat import _gateway_dialect, sentry_access_token_from_handler
+
+        if _gateway_dialect() == "sentry":
+            _tok = sentry_access_token_from_handler(handler)
+            if not _tok:
+                return _sentry_no_identity(handler)
+            from api.sentry_gateway_client import SentryGatewayError, get_json
+
+            try:
+                _payload = get_json("/api/chat/models", _tok) or {}
+            except SentryGatewayError:
+                # Report the outage. Never substitute the local catalogue: a
+                # transport blip must not silently repopulate the picker with
+                # models this deployment cannot reach.
+                return j(handler, _sentry_models_envelope([], unavailable=True))
+            _ids = [m for m in (_payload.get("models") or []) if isinstance(m, str) and m.strip()]
+            return j(handler, _sentry_models_envelope(_ids))
+
         # Profile-scoping for non-default profiles (#3957) is handled INSIDE
         # get_available_models() — it binds the active profile's env + TLS on
         # the detached rebuild worker (and the legacy synchronous rebuild),
