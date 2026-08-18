@@ -5361,11 +5361,33 @@ def apply_cors_preflight_headers(handler) -> None:
 
 
 def _csrf_exempt_path(path: str) -> bool:
-    """Paths that cannot or must not carry a session CSRF token."""
+    """Paths that cannot or must not carry a session CSRF token.
+
+    Everything here is posted by static/login.js from the /login page (plus the
+    browser's own CSP reporter). That page is never given a token: the session
+    CSRF token is injected as __CSRF_TOKEN_JSON__ into the main app shell only
+    ("/" and "/session/..."), so a login-page fetch has nothing to send and
+    would always fail _check_csrf with "token_mismatch" -- surfacing to the user
+    as "Session expired - reload the page" on a session created seconds ago.
+
+    These are safe to exempt for the reason /api/auth/login always was: each is
+    authenticated by a secret in the REQUEST BODY that a cross-origin attacker
+    can neither guess nor read back -- a password, the current password, a
+    recovery code issued out-of-band in Server Control, or a passkey assertion.
+    Blanket-exempting /api/auth/ would NOT be safe (it would cover
+    /api/auth/logout), so this stays an explicit allowlist.
+
+    IF YOU ADD AN ENDPOINT TO static/login.js, ADD IT HERE TOO -- that omission
+    is exactly how the password endpoints below broke.
+    """
     return path in {
         "/api/auth/login",
         "/api/auth/passkey/options",
         "/api/auth/passkey/login",
+        # Sentry dialect: both are rendered by login.js on the login page --
+        # the forced-change form, and lost-password recovery.
+        "/api/auth/password/change",
+        "/api/auth/password/recover",
         "/api/csp-report",
     }
 
