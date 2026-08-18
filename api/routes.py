@@ -10219,6 +10219,52 @@ _ALT_LOGIN_REFUSED_MSG = (
 )
 
 
+def _sentry_insights_envelope(usage: dict, *, unavailable: bool = False) -> dict:
+    """Shape the Gateway's usage rollup into what the Insights panel reads.
+
+    A model of None is rendered as "unattributed", NOT as "unknown". The old
+    local-data path produced an "unknown" bucket that looked like a real model
+    and quietly absorbed every turn; naming it for what it is (a turn whose
+    model we did not observe) keeps a gap in instrumentation visible.
+    """
+    by_model = usage.get("by_model") if isinstance(usage, dict) else None
+    by_tool = usage.get("by_tool") if isinstance(usage, dict) else None
+    models = []
+    totals = {"turns": 0, "input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+    for row in by_model or []:
+        if not isinstance(row, dict):
+            continue
+        # The Gateway returns bigint sums, which arrive as strings over JSON.
+        def _n(key):
+            try:
+                return int(row.get(key) or 0)
+            except (TypeError, ValueError):
+                return 0
+        entry = {
+            "model": row.get("model") or "unattributed",
+            "turns": _n("turns"),
+            "input_tokens": _n("input_tokens"),
+            "output_tokens": _n("output_tokens"),
+            "total_tokens": _n("total_tokens"),
+        }
+        models.append(entry)
+        for key in totals:
+            totals[key] += entry[key]
+    tools = [
+        {"name": r.get("tool_name"), "calls": r.get("calls")}
+        for r in (by_tool or [])
+        if isinstance(r, dict) and r.get("tool_name")
+    ]
+    return {
+        "source": "sentry-gateway",
+        "days": usage.get("days") if isinstance(usage, dict) else None,
+        "by_model": models,
+        "by_tool": tools,
+        "totals": totals,
+        "insights_unavailable": bool(unavailable),
+    }
+
+
 def _sentry_models_envelope(model_ids, *, unavailable: bool = False) -> dict:
     """Shape the Gateway's flat alias list into the picker's envelope.
 
@@ -12432,6 +12478,29 @@ def handle_get(handler, parsed) -> bool:
 
     # ── Insights / knowledge status ──
     if parsed.path == "/api/insights":
+        # _handle_insights reads LOCAL WebUI session data. Under the sentry
+        # dialect the turns happen in the Hermes container and this one holds
+        # almost nothing, which is why every turn bucketed as "unknown" and no
+        # tokens were counted. The Gateway records real per-turn usage; ask it.
+        from api.gateway_chat import _gateway_dialect, sentry_access_token_from_handler
+
+        if _gateway_dialect() == "sentry":
+            _tok = sentry_access_token_from_handler(handler)
+            if not _tok:
+                return _sentry_no_identity(handler)
+            from api.sentry_gateway_client import SentryGatewayError, get_json
+
+            _days = 30
+            try:
+                _days = min(max(int(parse_qs(parsed.query).get("days", ["30"])[0]), 1), 365)
+            except (ValueError, TypeError):
+                pass
+            try:
+                _usage = get_json(f"/api/chat/usage?days={_days}", _tok) or {}
+            except SentryGatewayError:
+                return j(handler, _sentry_insights_envelope({}, unavailable=True))
+            return j(handler, _sentry_insights_envelope(_usage))
+
         return _handle_insights(handler, parsed)
     if parsed.path == "/api/project-os/dashboard":
         return _handle_project_os_dashboard(handler, parsed)
@@ -12447,6 +12516,22 @@ def handle_get(handler, parsed) -> bool:
                 except SentryGatewayError:
                     return j(handler, {"tasks": [], "columns": [], "unavailable": True})
             return _sentry_no_identity(handler)
+        if _gateway_dialect() == "sentry":
+            # Only /api/kanban/board exists on the Gateway. The rest of the
+            # board is served by kanban_bridge, which imports hermes_cli -- a
+            # package this container does not ship, because it never loads the
+            # agent. That surfaced as a raw ModuleNotFoundError in the UI, which
+            # reads as a broken deployment rather than an absent feature. Say
+            # what is actually true instead.
+            return j(handler, {
+                "error": "Kanban is not available in this deployment.",
+                "detail": (
+                    "Board data is served by the Sentry Gateway, which currently "
+                    "implements only /api/kanban/board. The remaining endpoints "
+                    "need agent-local state this container does not have."
+                ),
+                "kanban_unavailable": True,
+            }, status=501)
         from api.kanban_bridge import handle_kanban_get
 
         # Only treat an explicit False as "no route matched". None means the
