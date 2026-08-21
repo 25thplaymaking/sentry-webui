@@ -1370,6 +1370,22 @@ def _run_gateway_chat_streaming(
             logger.debug("Failed to load WebUI gateway prefill context", exc_info=True)
             prefill_messages = []
         if dialect == "sentry":
+            if attachments:
+                # The Gateway's /api/chat/turn carries no attachment field, so
+                # anything attached here never reaches the agent. The transcript
+                # still renders the attachment, which made the drop invisible —
+                # say it in the stream instead of failing the whole turn.
+                names = ", ".join(
+                    str((a or {}).get("name") or (a or {}).get("filename") or "attachment")
+                    for a in attachments[:5]
+                ) or "attachment"
+                put_gateway_event("warning", {
+                    "message": (
+                        f"Not sent to the agent: {names}. This deployment's "
+                        "agent cannot receive files yet — paste the relevant "
+                        "content as text instead."
+                    ),
+                })
             try:
                 final_text, usage = _run_sentry_turn_streaming(
                     session_id,

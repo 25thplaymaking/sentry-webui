@@ -59,7 +59,7 @@ class _Sentinel(Exception):
     pass
 
 
-def _drive_sentry_turn(monkeypatch, *, gateway_token):
+def _drive_sentry_turn(monkeypatch, *, gateway_token, regeneration=False):
     """Run the sentry chat branch far enough to see which bearer it resolves.
 
     Returns (tokens_seen, apperror_messages).
@@ -101,6 +101,7 @@ def _drive_sentry_turn(monkeypatch, *, gateway_token):
         gc._run_gateway_chat_streaming(
             session_id, "hello", "gpt-x", "/workspace", stream_id,
             gateway_token=gateway_token,
+            regeneration=regeneration,
         )
     finally:
         gc.STREAMS.pop(stream_id, None)
@@ -124,6 +125,29 @@ def test_tokenless_sentry_turn_errors_instead_of_using_the_shared_key(monkeypatc
 def test_sentry_turn_uses_the_callers_own_token(monkeypatch):
     seen, _ = _drive_sentry_turn(monkeypatch, gateway_token="caller-token")
     assert seen == ["caller-token"]
+
+
+def test_regeneration_resolves_the_registered_session_token(monkeypatch):
+    """The upstream regeneration path calls the worker with NO gateway_token —
+    it leans entirely on the token _handle_chat_start registered against the
+    session before the regenerate branch ran. Pin that the bridge resolves it
+    from the registry rather than borrowing the shared key."""
+    gc.set_sentry_session_token("session-under-test", "cookie-token")
+    try:
+        seen, _ = _drive_sentry_turn(
+            monkeypatch, gateway_token=None, regeneration=True
+        )
+    finally:
+        gc.set_sentry_session_token("session-under-test", None)
+    assert seen == ["cookie-token"]
+
+
+def test_tokenless_regeneration_refuses_like_a_fresh_turn(monkeypatch):
+    seen, errors = _drive_sentry_turn(
+        monkeypatch, gateway_token=None, regeneration=True
+    )
+    assert seen == [], f"the regeneration must not be attempted, got bearer {seen}"
+    assert errors, "the refusal must reach the UI as an apperror"
 
 
 # ── Panel endpoints ─────────────────────────────────────────────────────────

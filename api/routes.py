@@ -10674,10 +10674,18 @@ def _sentry_cron_view(g: dict) -> dict:
     synthesized from that single record.
     """
     enabled = g.get("enabled") is not False
+    schedule_text = str(g.get("schedule") or "")
     return {
         "id": str(g.get("id") or ""),
         "name": g.get("name") or "",
-        "schedule": g.get("schedule") or "",
+        # The panel's contract (test_sprint3) is an OBJECT schedule plus a
+        # display string: the detail row and the edit form both read
+        # `schedule_display || schedule.expression`. Shipping the raw string
+        # here rendered an empty Schedule row and, worse, an empty required
+        # field on Edit -- Save was blocked until the user retyped the cron
+        # expression from memory.
+        "schedule": {"kind": "cron", "expression": schedule_text},
+        "schedule_display": schedule_text,
         "prompt": g.get("prompt") or "",
         "enabled": enabled,
         "state": "active" if enabled else "paused",
@@ -10707,6 +10715,28 @@ def _sentry_cron_last_run_entry(g: dict) -> list[dict]:
         "modified": modified,
         "status": g.get("last_status"),
     }]
+
+
+def _sentry_terminal_refused(handler):
+    """403 the embedded terminal under the sentry dialect, all verbs.
+
+    This is a security boundary, not a missing feature: the terminal executes
+    a real shell inside the SHARED WebUI container. Under sentry, multiple
+    people sign in to this one container, and the design boundary is that each
+    reaches only their own agent -- a shell here hands any signed-in user the
+    container's environment (gateway addresses, shared service credentials)
+    and every other user's server-side state. The agent's own terminal runs in
+    the agent's container, reached through chat, and is unaffected.
+    """
+    return j(handler, {
+        "error": "The embedded terminal is disabled in this deployment.",
+        "detail": (
+            "It would open a shell inside the shared WebUI container rather "
+            "than your agent's own environment. Ask your agent to run "
+            "commands in chat instead."
+        ),
+        "terminal_disabled": True,
+    }, status=403)
 
 
 def _sentry_kanban_unavailable(handler):
@@ -13290,6 +13320,14 @@ def handle_get(handler, parsed) -> bool:
 
     # ── Providers (GET) ──
     if parsed.path == "/api/providers":
+        from api.gateway_chat import _gateway_dialect
+        if _gateway_dialect() == "sentry":
+            # The local catalog with Add-key/Delete forms probed THIS
+            # container's env — credentials the per-user agents never read.
+            # Serving it made a dead pane look authoritative; the empty list
+            # plus the backend flag lets Settings say who really manages this.
+            return j(handler, {"providers": [],
+                               "providers_backend": "sentry-gateway"})
         # Apply the active per-request profile's env so provider auth probes
         # resolve against that profile's credentials, not the process-default
         # profile's (#3957). Without this, get_auth_status() probes on a
@@ -14346,6 +14384,9 @@ def handle_get(handler, parsed) -> bool:
         return _handle_sse_stream(handler, parsed)
 
     if parsed.path == "/api/terminal/output":
+        from api.gateway_chat import _gateway_dialect
+        if _gateway_dialect() == "sentry":
+            return _sentry_terminal_refused(handler)
         return _handle_terminal_output(handler, parsed)
 
     if parsed.path == '/api/sessions/gateway/stream':
@@ -14755,9 +14796,19 @@ def handle_get(handler, parsed) -> bool:
                         for p in _gw if isinstance(p, dict)
                     ]
                     _active = next((p["name"] for p in _profiles if p["active"]), None)
-                    return j(handler, {"profiles": _profiles, "active": _active})
+                    # single_profile_mode hides the New-profile button and the
+                    # user-chip profile dropdown: profile creation/switch/delete
+                    # are operator provisioning here, and the mutation routes
+                    # 501. Without it the panel also painted a red "Gateway
+                    # stopped" dot on every card (gateway_running is a
+                    # local-daemon concept this branch never reports).
+                    return j(handler, {"profiles": _profiles, "active": _active,
+                                       "single_profile_mode": True,
+                                       "profiles_backend": "sentry-gateway"})
                 except SentryGatewayError:
-                    return j(handler, {"profiles": [], "unavailable": True})
+                    return j(handler, {"profiles": [], "unavailable": True,
+                                       "single_profile_mode": True,
+                                       "profiles_backend": "sentry-gateway"})
             return _sentry_no_identity(handler)
         from api import profiles as profiles_api
         diag = RequestDiagnostics.maybe_start("GET", parsed.path, logger=logger, print_fn=getattr(handler, '_safe_webui_print', None))
@@ -15645,6 +15696,21 @@ def handle_post(handler, parsed) -> bool:
             return bad(handler, str(e))
 
     if parsed.path == "/api/default-model":
+        from api.gateway_chat import _gateway_dialect
+        if _gateway_dialect() == "sentry":
+            # Dispatched before the settings gate below, so it escaped it: the
+            # picker shows real Gateway aliases, Save toasts success, and the
+            # write lands in this container's local hermes config that no
+            # per-user runtime reads. Same honest refusal as /api/model/set.
+            return j(handler, {
+                "error": "This setting is managed by the Sentry Gateway.",
+                "detail": (
+                    "Pick a model from the chat model picker (it routes through "
+                    "your own agent). There is no deployment-wide default to "
+                    "set from this panel."
+                ),
+                "sentry_managed": True,
+            }, status=501)
         try:
             advanced = body.get("advanced") if isinstance(body, dict) else None
             provider = body.get("provider") if isinstance(body, dict) else None
@@ -16592,6 +16658,11 @@ def handle_post(handler, parsed) -> bool:
         from api.streaming import _handle_chat_steer
         return _handle_chat_steer(handler, body)
 
+    if parsed.path.startswith("/api/terminal/"):
+        from api.gateway_chat import _gateway_dialect
+        if _gateway_dialect() == "sentry":
+            return _sentry_terminal_refused(handler)
+
     if parsed.path == "/api/terminal/start":
         return _handle_terminal_start(handler, body)
 
@@ -16657,7 +16728,13 @@ def handle_post(handler, parsed) -> bool:
                     delete_json(f"/api/cron/{_jid()}", _tok)
                     return j(handler, {"ok": True})
                 if parsed.path == "/api/crons/run":
-                    result = post_json(f"/api/cron/{_jid()}/run", _tok, {}) or {}
+                    # Manual runs are SYNCHRONOUS on the Gateway: the response
+                    # arrives when the agent finishes. The client default of
+                    # 15s turned any honest minute-long run into "gateway
+                    # unreachable: timed out" while the run completed fine.
+                    result = post_json(
+                        f"/api/cron/{_jid()}/run", _tok, {}, timeout=300.0
+                    ) or {}
                     return j(handler, result)
                 enabled = parsed.path == "/api/crons/resume"
                 updated = put_json(f"/api/cron/{_jid()}", _tok, {"enabled": enabled}) or {}
@@ -16877,7 +16954,9 @@ def handle_post(handler, parsed) -> bool:
                 })
             except SentryGatewayError as exc:
                 return bad(handler, str(exc), exc.status or 502)
-            return j(handler, sent or {"delivered": True})
+            # The UI keys success on `delivered`; guarantee the flag rather
+            # than betting on the Gateway's response shape staying flag-like.
+            return j(handler, {"delivered": True, **(sent or {})})
         try:
             require(body, "id")
         except ValueError as e:

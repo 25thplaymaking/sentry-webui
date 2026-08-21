@@ -278,7 +278,10 @@ async function agentAdminLogout(provider) {
 /* ── Inbox ──────────────────────────────────────────────────────────────── */
 
 function _aaRenderInbox(payload) {
-  if (!payload || payload.available === false || payload.unavailable) {
+  // An error body without a messages array (e.g. the 401 no-identity refusal)
+  // must render as unavailable, not as a false "No messages."
+  if (!payload || payload.available === false || payload.unavailable
+      || (payload.error && !Array.isArray(payload.messages))) {
     return _aaUnavailable(payload || {}, 'Agent inbox');
   }
   const messages = Array.isArray(payload.messages) ? payload.messages : [];

@@ -1014,9 +1014,19 @@ function _cronGatewayNoticeHtml(status) {
   `;
 }
 
+let _cronBackend = null; // 'sentry-gateway' when jobs live in (and fire from) the Sentry Gateway
+
 async function loadCronGatewayNotice() {
   const box = $('cronGatewayNotice');
   if (!box) return;
+  if (_cronBackend === 'sentry-gateway') {
+    // The notice probes the LOCAL hermes daemon; under sentry the Sentry
+    // Gateway is the scheduler, so "scheduled ticks need a gateway container"
+    // above a working job list was simply false.
+    box.innerHTML = '';
+    box.style.display = 'none';
+    return;
+  }
   try {
     const status = await api('/api/gateway/status');
     const html = _cronGatewayNoticeHtml(status);
@@ -1046,6 +1056,7 @@ async function loadCrons(animate) {
     const allProfilesQS = _showAllCronProfiles ? '?all_profiles=1' : '';
     const data = await api('/api/crons' + allProfilesQS);
     _cronList = data.jobs || [];
+    _cronBackend = data.cron_backend || null;
     _cronOtherProfileCount = Number(data.other_profile_count || 0);
     if (_showAllCronProfiles && !_cronList.some(job => job && job.read_only)) {
       _showAllCronProfiles = false;
@@ -1288,12 +1299,16 @@ function _renderCronDetail(job){
         <div class="detail-row"><div class="detail-row-label">Schedule</div><div class="detail-row-value"><code>${esc(schedule)}</code></div></div>
         <div class="detail-row"><div class="detail-row-label">${esc(t('cron_next'))}</div><div class="detail-row-value">${esc(nextRun)}</div></div>
         <div class="detail-row"><div class="detail-row-label">${esc(t('cron_last'))}</div><div class="detail-row-value">${esc(lastRun)}</div></div>
+        ${_cronBackend === 'sentry-gateway' ? `
+        ${job.last_status ? `<div class="detail-row"><div class="detail-row-label">${esc(t('cron_last_status_label'))}</div><div class="detail-row-value"><span class="detail-badge ${job.last_status === 'ok' ? 'active' : ''}">${esc(job.last_status)}</span></div></div>` : ''}
+        ` : `
         <div class="detail-row"><div class="detail-row-label">Deliver</div><div class="detail-row-value">${esc(deliver)}</div></div>
         <div class="detail-row"><div class="detail-row-label">${esc(t('cron_mode_label') || 'Mode')}</div><div class="detail-row-value"><span class="detail-badge cron-mode-badge ${isNoAgent ? 'script' : 'agent'}" id="cronJobMode">${esc(cronJobMode)}</span>${modelProvider ? ` <code>${modelProvider}</code>` : ''}</div></div>
         ${showOwnerRow ? `<div class="detail-row"><div class="detail-row-label">Owner profile</div><div class="detail-row-value"><span class="detail-badge active" title="${esc(ownerProfileTitle)}">${esc(ownerProfileLabel)}</span></div></div>` : ''}
         <div class="detail-row"><div class="detail-row-label">${esc(t('cron_profile_label') || 'Profile')}</div><div class="detail-row-value"><span class="detail-badge active" title="${esc(profileTitle)}">${esc(profileLabel)}</span></div></div>
         <div class="detail-row"><div class="detail-row-label">${esc(t('cron_toast_notifications_label') || 'Completion toasts')}</div><div class="detail-row-value"><span class="detail-badge ${toastNotifications ? 'active' : ''}">${esc(toastNotifications ? (t('cron_toast_notifications_enabled') || 'Enabled') : (t('cron_toast_notifications_disabled') || 'Disabled'))}</span></div></div>
         ${skillsRow}
+        `}
         ${lastError}
       </div>
       ${instructionCard}
@@ -1692,6 +1707,9 @@ function _renderCronForm({ name, schedule, prompt, deliver, profile, toast_notif
         </div>
         ${scriptBlock}
         ${promptBlock}
+        ${_cronBackend === 'sentry-gateway' ? `
+        <div class="detail-form-hint">${esc(t('cron_sentry_form_hint'))}</div>
+        ` : `
         <div class="detail-form-row">
           <label for="cronFormDeliver">${esc(t('cron_deliver_label') || 'Deliver output to')}</label>
           <select id="cronFormDeliver">
@@ -1720,6 +1738,7 @@ function _renderCronForm({ name, schedule, prompt, deliver, profile, toast_notif
           </label>
         </div>
         ${skillsBlock}
+        `}
         <div id="cronFormError" class="detail-form-error" style="display:none"></div>
       </form>
     </div>`;
@@ -2089,7 +2108,9 @@ function _checkCronWatchOnDetail(jobId, detailKey) {
 
 async function cronRun(id) {
   try {
-    await api('/api/crons/run', {method:'POST', body: JSON.stringify({job_id: id})});
+    // Gateway-backed runs are synchronous and can honestly take minutes; the
+    // default 30s client timeout reported a live run as failed.
+    await api('/api/crons/run', {method:'POST', body: JSON.stringify({job_id: id}), timeoutMs: 310000});
     showToast(t('cron_job_triggered'));
     _startCronWatch(id, _currentCronDetailKey);
   } catch(e) { showToast(t('failed_colon') + e.message, 4000); }
@@ -6834,9 +6855,12 @@ async function loadProfilesPanel() {
       if (typeof p.model === 'string' && p.model) meta.push(p.model.split('/').pop());
       if (p.provider) meta.push(p.provider);
       if (p.total_skills && p.total_skills > 0) meta.push(t('profile_skill_count', p.total_skills).replace(String(p.total_skills), `${p.enabled_skills} / ${p.total_skills}`));
-      const gwDot = p.gateway_running
+      // Gateway-backed profiles have no local daemon to report on; a
+      // "stopped" dot for an agent that is in fact running is a lie.
+      const _sentryProfiles = (data && data.profiles_backend) === 'sentry-gateway';
+      const gwDot = _sentryProfiles ? '' : (p.gateway_running
         ? `<span class="profile-opt-badge running" title="${esc(t('profile_gateway_running'))}"></span>`
-        : `<span class="profile-opt-badge stopped" title="${esc(t('profile_gateway_stopped'))}"></span>`;
+        : `<span class="profile-opt-badge stopped" title="${esc(t('profile_gateway_stopped'))}"></span>`);
       const isActive = p.name === activeName;
       const activeBadge = isActive ? `<span style="color:var(--link);font-size:10px;font-weight:600;margin-left:6px">${esc(t('profile_active'))}</span>` : '';
       const defaultBadge = p.is_default ? ` <span style="opacity:.5">${esc(t('profile_default_label'))}</span>` : '';
@@ -6899,16 +6923,19 @@ function _renderProfileDetail(p, activeName){
     ? `<span class="detail-badge active">${esc(t('profile_active'))}</span>`
     : `<span class="detail-badge">Inactive</span>`;
   const defaultBadge = isDefault ? ` <span class="detail-badge">${esc(t('profile_default_label'))}</span>` : '';
+  const _sentryProfiles = !!(_profilesCache && _profilesCache.profiles_backend === 'sentry-gateway');
   const gwBadge = p.gateway_running
     ? `<span class="detail-badge ok">${esc(t('profile_gateway_running'))}</span>`
     : `<span class="detail-badge">${esc(t('profile_gateway_stopped'))}</span>`;
   const rows = [];
   rows.push(`<div class="detail-row"><div class="detail-row-label">Status</div><div class="detail-row-value">${statusBadge}${defaultBadge}</div></div>`);
-  rows.push(`<div class="detail-row"><div class="detail-row-label">Gateway</div><div class="detail-row-value">${gwBadge}</div></div>`);
+  // Gateway-backed profiles: no local daemon row, and credentials are
+  // operator-provisioned — "API key: Not configured" here was false alarm.
+  if (!_sentryProfiles) rows.push(`<div class="detail-row"><div class="detail-row-label">Gateway</div><div class="detail-row-value">${gwBadge}</div></div>`);
   if (p.model) rows.push(`<div class="detail-row"><div class="detail-row-label">Model</div><div class="detail-row-value"><code>${esc(p.model)}</code></div></div>`);
   if (p.provider) rows.push(`<div class="detail-row"><div class="detail-row-label">Provider</div><div class="detail-row-value">${esc(p.provider)}</div></div>`);
   if (p.base_url) rows.push(`<div class="detail-row"><div class="detail-row-label">Base URL</div><div class="detail-row-value"><code>${esc(p.base_url)}</code></div></div>`);
-  rows.push(`<div class="detail-row"><div class="detail-row-label">API key</div><div class="detail-row-value">${p.has_env ? esc(t('profile_api_keys_configured')) : '<span style="color:var(--muted)">Not configured</span>'}</div></div>`);
+  if (!_sentryProfiles) rows.push(`<div class="detail-row"><div class="detail-row-label">API key</div><div class="detail-row-value">${p.has_env ? esc(t('profile_api_keys_configured')) : '<span style="color:var(--muted)">Not configured</span>'}</div></div>`);
   if (p.total_skills && p.total_skills > 0) rows.push(`<div class="detail-row"><div class="detail-row-label">Skills</div><div class="detail-row-value">${esc(t('profile_skill_count', p.total_skills).replace(String(p.total_skills), `${p.enabled_skills} / ${p.total_skills}`))}</div></div>`);
   if (p.default_workspace) rows.push(`<div class="detail-row"><div class="detail-row-label">Default space</div><div class="detail-row-value"><code>${esc(p.default_workspace)}</code></div></div>`);
   body.innerHTML = `
@@ -11120,6 +11147,14 @@ async function loadProvidersPanel(){
   if(!list) return;
   try{
     const data=await api('/api/providers');
+    if (data && data.providers_backend === 'sentry-gateway') {
+      // Provider credentials live with each agent, connected through the
+      // Agent panel's subscription sign-in or by the operator — not here.
+      list.style.display='';
+      if(empty) empty.style.display='none';
+      list.innerHTML=`<div style="padding:12px;color:var(--muted);font-size:12px">${esc(t('providers_sentry_note'))}</div>`;
+      return;
+    }
     const quota=await _fetchProviderQuotaStatus(false).catch(e=>({ok:false,status:'unavailable',quota:null,message:e.message||t('provider_quota_unavailable'),client_fetched_at:new Date().toISOString()}));
     const providers=(data.providers||[]).filter(p=>p.configurable||p.is_oauth||p.is_custom||p.is_plugin_provider||p.is_self_hosted);
     list.innerHTML='';
