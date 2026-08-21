@@ -275,6 +275,85 @@ async function agentAdminLogout(provider) {
   await loadAgentAdmin();
 }
 
+/* ── Inbox ──────────────────────────────────────────────────────────────── */
+
+function _aaRenderInbox(payload) {
+  if (!payload || payload.available === false || payload.unavailable) {
+    return _aaUnavailable(payload || {}, 'Agent inbox');
+  }
+  const messages = Array.isArray(payload.messages) ? payload.messages : [];
+  const sendToggle =
+    `<div style="margin-top:6px"><a href="#" onclick="agentAdminShowSend();return false" style="font-size:12px">Send a message to another agent…</a></div>`;
+  if (!messages.length) {
+    return `<div style="padding:12px;color:var(--muted);font-size:12px">No messages.</div>` + sendToggle;
+  }
+  const rows = messages.map((m) => {
+    const when = m.created_at ? new Date(m.created_at).toLocaleString() : '';
+    const id = _aaEsc(m.id);
+    const readBadge = m.read
+      ? ''
+      : `<button class="panel-head-btn" style="font-size:11px" onclick="agentAdminMarkRead('${id}')">Mark read</button>`;
+    return `
+      <div style="padding:10px;border:1px solid var(--border);border-radius:8px;margin-bottom:8px;${m.read ? 'opacity:.75' : ''}">
+        <div style="display:flex;justify-content:space-between;gap:8px;align-items:center">
+          <div style="font-size:11px;color:var(--muted)">from ${_aaEsc(m.sender_profile_id)} · ${_aaEsc(when)}</div>
+          ${readBadge}
+        </div>
+        <pre style="margin:6px 0 0;padding:8px;background:var(--input-bg);border-radius:6px;white-space:pre-wrap;word-break:break-word;font-size:12px">${_aaEsc(m.body || '')}</pre>
+      </div>`;
+  }).join('');
+  return rows + sendToggle;
+}
+
+function agentAdminShowSend() {
+  const box = document.getElementById('agentAdminSendBox');
+  if (!box) return;
+  box.style.display = '';
+  box.innerHTML = `
+    <div style="padding:12px;border:1px solid var(--border);border-radius:8px">
+      <div style="font-size:12px;font-weight:600">Send to another agent</div>
+      <div style="font-size:11px;color:var(--muted);margin:4px 0 8px">
+        Delivery needs an operator-granted allow-list entry for your profile → theirs; without one the Gateway refuses.
+      </div>
+      <input id="agentAdminSendRecipient" type="text" placeholder="Recipient profile id (UUID)"
+             style="width:100%;box-sizing:border-box;margin-bottom:6px;padding:6px 8px;font-size:12px" autocomplete="off">
+      <textarea id="agentAdminSendBody" rows="3" placeholder="Message"
+             style="width:100%;box-sizing:border-box;margin-bottom:6px;padding:6px 8px;font-size:12px"></textarea>
+      <div style="display:flex;gap:8px;justify-content:flex-end">
+        <button class="panel-head-btn" onclick="document.getElementById('agentAdminSendBox').style.display='none'">Cancel</button>
+        <button class="panel-head-btn primary" onclick="agentAdminSendMessage()">Send</button>
+      </div>
+    </div>`;
+}
+
+async function agentAdminSendMessage() {
+  const recipient = (document.getElementById('agentAdminSendRecipient') || {}).value || '';
+  const body = (document.getElementById('agentAdminSendBody') || {}).value || '';
+  if (!recipient.trim() || !body.trim()) { _aaToast('Recipient and message are both required.'); return; }
+  const result = await _aaFetch('/api/agent-messages', {
+    method: 'POST',
+    body: JSON.stringify({ recipient_profile_id: recipient.trim(), body }),
+  });
+  if (result && (result.delivered || result.ok)) {
+    _aaToast('Message delivered.');
+    const box = document.getElementById('agentAdminSendBox');
+    if (box) box.style.display = 'none';
+  } else {
+    _aaToast(`Could not send: ${(result && result.error) || 'unknown error'}`);
+  }
+}
+
+async function agentAdminMarkRead(messageId) {
+  const result = await _aaFetch('/api/agent-messages/read', {
+    method: 'POST', body: JSON.stringify({ id: messageId }),
+  });
+  if (!result || result.error) {
+    _aaToast(`Could not mark read: ${(result && result.error) || 'unknown error'}`);
+    return;
+  }
+  await loadAgentAdmin();
+}
+
 /* ── Panel load ─────────────────────────────────────────────────────────── */
 
 async function loadAgentAdmin() {
@@ -285,11 +364,16 @@ async function loadAgentAdmin() {
   if (pendingEl) pendingEl.innerHTML = '<div style="padding:12px;color:var(--muted);font-size:12px">Loading…</div>';
   if (providersEl) providersEl.innerHTML = '<div style="padding:12px;color:var(--muted);font-size:12px">Loading…</div>';
 
-  const [memory, skills, providers] = await Promise.all([
+  const inboxEl = document.getElementById('agentAdminInbox');
+  if (inboxEl) inboxEl.innerHTML = '<div style="padding:12px;color:var(--muted);font-size:12px">Loading…</div>';
+
+  const [memory, skills, providers, inbox] = await Promise.all([
     _aaFetch('/api/agent/pending/memory'),
     _aaFetch('/api/agent/pending/skills'),
     _aaFetch('/api/agent/auth/providers'),
+    _aaFetch('/api/agent-messages'),
   ]);
+  if (inboxEl) inboxEl.innerHTML = _aaRenderInbox(inbox);
 
   if (pendingEl) {
     pendingEl.innerHTML =

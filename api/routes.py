@@ -10663,6 +10663,96 @@ def _sentry_no_identity(handler):
     return bad(handler, SENTRY_NO_IDENTITY_MESSAGE, 401)
 
 
+_SENTRY_CRON_RUN_FILENAME = "latest-run.md"
+
+
+def _sentry_cron_view(g: dict) -> dict:
+    """One Gateway cron job in the Tasks panel's own vocabulary.
+
+    The Gateway keeps one summarized latest run per job (last_run_at /
+    last_status / last_summary), not a run directory -- history and output are
+    synthesized from that single record.
+    """
+    enabled = g.get("enabled") is not False
+    return {
+        "id": str(g.get("id") or ""),
+        "name": g.get("name") or "",
+        "schedule": g.get("schedule") or "",
+        "prompt": g.get("prompt") or "",
+        "enabled": enabled,
+        "state": "active" if enabled else "paused",
+        "no_agent": False,
+        "read_only": False,
+        "created_at": g.get("created_at"),
+        "last_run_at": g.get("last_run_at"),
+        "last_status": g.get("last_status"),
+        "last_summary": g.get("last_summary"),
+    }
+
+
+def _sentry_cron_last_run_entry(g: dict) -> list[dict]:
+    """Zero or one synthetic history rows from the job's latest-run record."""
+    last_run = g.get("last_run_at")
+    if not last_run:
+        return []
+    try:
+        from datetime import datetime as _dt
+        modified = _dt.fromisoformat(str(last_run).replace("Z", "+00:00")).timestamp()
+    except (TypeError, ValueError):
+        modified = 0
+    summary = str(g.get("last_summary") or g.get("last_status") or "")
+    return [{
+        "filename": _SENTRY_CRON_RUN_FILENAME,
+        "size": len(summary.encode("utf-8")),
+        "modified": modified,
+        "status": g.get("last_status"),
+    }]
+
+
+def _sentry_kanban_unavailable(handler):
+    """501 every kanban route the Gateway does not implement, on all verbs.
+
+    Only /api/kanban/board exists on the Gateway. The rest of the board is
+    served by kanban_bridge, which imports hermes_cli -- a package this
+    container does not ship, because it never loads the agent. That surfaced
+    as a raw ModuleNotFoundError in the UI (and a raw 500 on every POST/PATCH/
+    DELETE, e.g. any card drag), which reads as a broken deployment rather
+    than an absent feature. Say what is actually true instead.
+    """
+    return j(handler, {
+        "error": "Kanban is not available in this deployment.",
+        "detail": (
+            "Board data is served by the Sentry Gateway, which currently "
+            "implements only /api/kanban/board. The remaining endpoints "
+            "need agent-local state this container does not have."
+        ),
+        "kanban_unavailable": True,
+    }, status=501)
+
+
+def _sentry_skills_readonly(handler):
+    """501 skill content/mutation routes under the sentry dialect.
+
+    The sentry Skills panel is the Gateway's governance view (states and
+    content hashes), and the boundary is deliberate: the WebUI can ask the
+    agent to do things but cannot edit its skills — skill writes go through
+    the agent's own staged-write queue and are approved in the Agent panel.
+    The local handlers here read/write this container's skills directory,
+    which no per-user Hermes ever loads, so under sentry they answered with
+    404s ("Skill not found") and silent-success writes into a dead directory.
+    """
+    return j(handler, {
+        "error": "Skill editing is not available in this deployment.",
+        "detail": (
+            "Skills belong to your agent and change through its own staged "
+            "writes, reviewed in the Agent panel. The Gateway lists each "
+            "skill's governance state; it does not serve or accept skill "
+            "content."
+        ),
+        "skills_readonly": True,
+    }, status=501)
+
+
 def _alternate_login_allowed() -> bool:
     """Never raises: a failure here must not lock out a working deployment."""
     try:
@@ -12990,21 +13080,7 @@ def handle_get(handler, parsed) -> bool:
                     return j(handler, {"tasks": [], "columns": [], "unavailable": True})
             return _sentry_no_identity(handler)
         if _gateway_dialect() == "sentry":
-            # Only /api/kanban/board exists on the Gateway. The rest of the
-            # board is served by kanban_bridge, which imports hermes_cli -- a
-            # package this container does not ship, because it never loads the
-            # agent. That surfaced as a raw ModuleNotFoundError in the UI, which
-            # reads as a broken deployment rather than an absent feature. Say
-            # what is actually true instead.
-            return j(handler, {
-                "error": "Kanban is not available in this deployment.",
-                "detail": (
-                    "Board data is served by the Sentry Gateway, which currently "
-                    "implements only /api/kanban/board. The remaining endpoints "
-                    "need agent-local state this container does not have."
-                ),
-                "kanban_unavailable": True,
-            }, status=501)
+            return _sentry_kanban_unavailable(handler)
         from api.kanban_bridge import handle_kanban_get
 
         # Only treat an explicit False as "no route matched". None means the
@@ -14352,9 +14428,22 @@ def handle_get(handler, parsed) -> bool:
             if _tok:
                 from api.sentry_gateway_client import SentryGatewayError, get_json
                 try:
-                    return j(handler, {"jobs": get_json("/api/cron", _tok) or []})
+                    gw_jobs = get_json("/api/cron", _tok) or []
                 except SentryGatewayError:
-                    return j(handler, {"jobs": [], "cron_unavailable": True})
+                    return j(handler, {"jobs": [], "cron_unavailable": True,
+                                       "cron_backend": "sentry-gateway"})
+                # Translate Gateway jobs into the panel's own job shape (the
+                # raw list rendered but every affordance around it was dead).
+                # state drives the active/paused partition; no_agent False
+                # keeps the agent badge, which is truthful -- a Gateway job IS
+                # an agent prompt.
+                return j(handler, {
+                    "jobs": [_sentry_cron_view(g) for g in gw_jobs if isinstance(g, dict)],
+                    "all_profiles": False,
+                    "active_profile": "",
+                    "other_profile_count": 0,
+                    "cron_backend": "sentry-gateway",
+                })
             return _sentry_no_identity(handler)
         # #4768: in split-container / minimal Docker deployments the WebUI image may
         # not ship the agent's `cron` package on its import path. Degrade gracefully
@@ -14379,6 +14468,55 @@ def handle_get(handler, parsed) -> bool:
             "active_profile": active_profile,
             "other_profile_count": hidden_other_count,
         })
+
+    if parsed.path in {"/api/crons/output", "/api/crons/history", "/api/crons/run",
+                       "/api/crons/recent", "/api/crons/status",
+                       "/api/crons/delivery-options"}:
+        from api.gateway_chat import _gateway_dialect, sentry_access_token_from_handler
+        if _gateway_dialect() == "sentry":
+            # The local handlers below walk this container's cron run
+            # directories, which the Gateway scheduler never writes. The
+            # Gateway keeps one summarized latest run per job; serve that,
+            # and empty-but-well-shaped answers for the polling surfaces.
+            if parsed.path == "/api/crons/recent":
+                return j(handler, {"completions": []})
+            if parsed.path == "/api/crons/status":
+                # Manual runs are synchronous through the Gateway, so there
+                # is never a background "running" state to watch here.
+                return j(handler, {"running": False})
+            if parsed.path == "/api/crons/delivery-options":
+                # Delivery targets are a local-agent concept; a Gateway job's
+                # output lands in its latest-run record.
+                return j(handler, {"platforms": []})
+            _tok = sentry_access_token_from_handler(handler)
+            if not _tok:
+                return _sentry_no_identity(handler)
+            qs = parse_qs(parsed.query)
+            job_id = (qs.get("job_id") or [""])[0]
+            from api.sentry_gateway_client import SentryGatewayError, get_json
+            try:
+                gw_jobs = get_json("/api/cron", _tok) or []
+            except SentryGatewayError as exc:
+                return bad(handler, str(exc), exc.status or 502)
+            job = next(
+                (g for g in gw_jobs
+                 if isinstance(g, dict) and str(g.get("id")) == str(job_id)),
+                None,
+            )
+            if job is None:
+                return bad(handler, "Unknown job", 404)
+            if parsed.path == "/api/crons/history":
+                runs = _sentry_cron_last_run_entry(job)
+                return j(handler, {"runs": runs, "total": len(runs)})
+            if parsed.path == "/api/crons/run":
+                summary = str(job.get("last_summary") or "")
+                status_txt = str(job.get("last_status") or "")
+                content = summary or (f"status: {status_txt}" if status_txt else "No output recorded.")
+                return j(handler, {"content": content, "snippet": content[:2000]})
+            # /api/crons/output
+            return j(handler, {
+                "error": "Run directories do not exist for Gateway jobs; see the latest-run record.",
+            }, status=501)
 
     if parsed.path == "/api/crons/output":
         from api.profiles import cron_profile_context
@@ -14439,12 +14577,19 @@ def handle_get(handler, parsed) -> bool:
                             "description": f"state: {s.get('state')}",
                             "enabled": s.get("state") == "active",
                             "state": s.get("state"),
+                            "content_hash": s.get("content_hash"),
+                            "created_at": s.get("created_at"),
                         }
                         for s in gw if isinstance(s, dict)
                     ]
-                    return j(handler, {"skills": skills})
+                    # skills_backend tells the panel this is the Gateway's
+                    # governance view: read-only by design (the WebUI must not
+                    # edit agent skills — that boundary is the deployment's
+                    # security model), so the panel hides create/toggle/save.
+                    return j(handler, {"skills": skills, "skills_backend": "sentry-gateway"})
                 except SentryGatewayError as exc:
-                    return j(handler, {"skills": [], "unavailable": True, "error": str(exc)})
+                    return j(handler, {"skills": [], "unavailable": True, "error": str(exc),
+                                       "skills_backend": "sentry-gateway"})
             return _sentry_no_identity(handler)
         qs = parse_qs(parsed.query)
         category = qs.get("category", [None])[0]
@@ -14488,6 +14633,9 @@ def handle_get(handler, parsed) -> bool:
         })
 
     if parsed.path == "/api/skills/content":
+        from api.gateway_chat import _gateway_dialect
+        if _gateway_dialect() == "sentry":
+            return _sentry_skills_readonly(handler)
         qs = parse_qs(parsed.query)
         name = qs.get("name", [""])[0]
         if not name:
@@ -14529,9 +14677,47 @@ def handle_get(handler, parsed) -> bool:
             if _tok:
                 from api.sentry_gateway_client import SentryGatewayError, get_json
                 try:
-                    return j(handler, {"sections": get_json("/api/memory", _tok) or []})
+                    sections = get_json("/api/memory", _tok) or []
                 except SentryGatewayError:
-                    return j(handler, {"sections": [], "unavailable": True})
+                    sections = None
+                # The panel reads the local handler's FLAT shape (memory/user/
+                # soul/project_context + *_mtime), not a section list — the raw
+                # proxy rendered every pane permanently empty. Translate here so
+                # the UI needs no dialect fork. Gateway sections are caller-
+                # defined; the four the panel shows are the ones it can name.
+                # *_path stays "" on purpose: these live in the Gateway's
+                # database, and inventing a filesystem path would send someone
+                # hunting for a file that does not exist.
+                flat = {
+                    "memory": "", "user": "", "soul": "", "project_context": "",
+                    "memory_path": "", "user_path": "", "soul_path": "",
+                    "project_context_path": "", "project_context_name": "",
+                    "project_context_workspace": "",
+                    "memory_mtime": None, "user_mtime": None,
+                    "soul_mtime": None, "project_context_mtime": None,
+                    "memory_backend": "sentry-gateway",
+                }
+                if sections is None:
+                    flat["unavailable"] = True
+                    return j(handler, flat)
+                known = {"memory", "user", "soul", "project_context"}
+                for row in sections:
+                    if not isinstance(row, dict):
+                        continue
+                    name = str(row.get("section") or "")
+                    if name not in known:
+                        continue
+                    flat[name] = str(row.get("content") or "")
+                    updated = row.get("updated_at")
+                    if updated:
+                        try:
+                            from datetime import datetime as _dt
+                            flat[f"{name}_mtime"] = _dt.fromisoformat(
+                                str(updated).replace("Z", "+00:00")
+                            ).timestamp()
+                        except (TypeError, ValueError):
+                            pass
+                return j(handler, flat)
             return _sentry_no_identity(handler)
         return _handle_memory_read(handler, parsed)
 
@@ -15088,6 +15274,9 @@ def handle_post(handler, parsed) -> bool:
         return j(handler, result, status=200 if result.get("clean") else 409)
 
     if parsed.path.startswith("/api/kanban/"):
+        from api.gateway_chat import _gateway_dialect
+        if _gateway_dialect() == "sentry":
+            return _sentry_kanban_unavailable(handler)
         from api.kanban_bridge import handle_kanban_post
 
         result = handle_kanban_post(handler, parsed, body)
@@ -15463,6 +15652,25 @@ def handle_post(handler, parsed) -> bool:
             return bad(handler, str(e), 500)
 
     # ── Auxiliary model set (POST) ──
+    if parsed.path in {"/api/model/set", "/api/providers", "/api/providers/delete",
+                       "/api/providers/self-hosted", "/api/profile/switch",
+                       "/api/profile/create", "/api/profile/delete"}:
+        from api.gateway_chat import _gateway_dialect
+        if _gateway_dialect() == "sentry":
+            # These write this container's local hermes config/profiles, which
+            # no per-user runtime reads. Model choice is per-session through
+            # the Gateway picker; profiles and provider credentials belong to
+            # the Gateway operator. Silent local success here is the trap.
+            return j(handler, {
+                "error": "This setting is managed by the Sentry Gateway.",
+                "detail": (
+                    "Pick a model from the chat model picker (it routes through "
+                    "your own agent). Profiles and provider credentials are "
+                    "provisioned by the operator, not from this panel."
+                ),
+                "sentry_managed": True,
+            }, status=501)
+
     if parsed.path == "/api/model/set":
         scope = str(body.get("scope") or "").strip()
         task = str(body.get("task") or "").strip()
@@ -16394,6 +16602,66 @@ def handle_post(handler, parsed) -> bool:
     # ── Cron API (POST) ──
     # See GET-side comment above: wrap in cron_profile_context so writes go
     # to the TLS-active profile's jobs.json instead of the process default.
+    if parsed.path in {"/api/crons/create", "/api/crons/update", "/api/crons/delete",
+                       "/api/crons/run", "/api/crons/pause", "/api/crons/resume"}:
+        from api.gateway_chat import _gateway_dialect, sentry_access_token_from_handler
+        if _gateway_dialect() == "sentry":
+            # Route every mutation to the Gateway's per-profile job store --
+            # the local handlers write this container's cron package, which no
+            # scheduler reads under this dialect, so each button "worked" while
+            # doing nothing. Fields the Gateway does not model (deliver, model,
+            # skills, toast_notifications) are dropped here on purpose.
+            _tok = sentry_access_token_from_handler(handler)
+            if not _tok:
+                return _sentry_no_identity(handler)
+            from api.sentry_gateway_client import (
+                SentryGatewayError, delete_json, post_json, put_json,
+            )
+            import urllib.parse as _up
+
+            def _jid():
+                jid = str(body.get("job_id") or body.get("id") or "").strip()
+                if not jid:
+                    raise ValueError("job_id is required")
+                return _up.quote(jid, safe="")
+
+            try:
+                if parsed.path == "/api/crons/create":
+                    payload = {
+                        "name": str(body.get("name") or "").strip()
+                                or str(body.get("prompt") or "job")[:60],
+                        "schedule": str(body.get("schedule") or "").strip(),
+                        "prompt": str(body.get("prompt") or ""),
+                    }
+                    created = post_json("/api/cron", _tok, payload) or {}
+                    if body.get("enabled") is False and created.get("id"):
+                        created = put_json(
+                            f"/api/cron/{_up.quote(str(created['id']), safe='')}",
+                            _tok, {"enabled": False},
+                        ) or created
+                    return j(handler, _sentry_cron_view(created))
+                if parsed.path == "/api/crons/update":
+                    updates = {
+                        key: body[key]
+                        for key in ("name", "schedule", "prompt", "enabled")
+                        if key in body and body[key] is not None
+                    }
+                    updated = put_json(f"/api/cron/{_jid()}", _tok, updates) or {}
+                    return j(handler, _sentry_cron_view(updated))
+                if parsed.path == "/api/crons/delete":
+                    delete_json(f"/api/cron/{_jid()}", _tok)
+                    return j(handler, {"ok": True})
+                if parsed.path == "/api/crons/run":
+                    result = post_json(f"/api/cron/{_jid()}/run", _tok, {}) or {}
+                    return j(handler, result)
+                enabled = parsed.path == "/api/crons/resume"
+                updated = put_json(f"/api/cron/{_jid()}", _tok, {"enabled": enabled}) or {}
+                return j(handler, _sentry_cron_view(updated))
+            except ValueError as exc:
+                return bad(handler, str(exc))
+            except SentryGatewayError as exc:
+                return bad(handler, str(exc), exc.status or 502)
+
     if parsed.path == "/api/crons/create":
         from api.profiles import cron_profile_context
 
@@ -16568,6 +16836,11 @@ def handle_post(handler, parsed) -> bool:
             return bad(handler, _sanitize_error(e), 500)
 
     # ── Skills (POST) ──
+    if parsed.path in {"/api/skills/save", "/api/skills/delete", "/api/skills/toggle"}:
+        from api.gateway_chat import _gateway_dialect
+        if _gateway_dialect() == "sentry":
+            return _sentry_skills_readonly(handler)
+
     if parsed.path == "/api/skills/save":
         return _handle_skill_save(handler, body)
 
@@ -16578,7 +16851,70 @@ def handle_post(handler, parsed) -> bool:
         return _handle_skill_toggle(handler, body)
 
     # ── Memory (POST) ──
+    # ── Inbox: Sentry inter-agent messages (POST) ──
+    if parsed.path in {"/api/agent-messages", "/api/agent-messages/read"}:
+        from api.gateway_chat import _gateway_dialect, sentry_access_token_from_handler
+        if _gateway_dialect() != "sentry":
+            return bad(handler, "Not found", 404)
+        _tok = sentry_access_token_from_handler(handler)
+        if not _tok:
+            return _sentry_no_identity(handler)
+        from api.sentry_gateway_client import SentryGatewayError, post_json
+        if parsed.path == "/api/agent-messages":
+            try:
+                require(body, "recipient_profile_id", "body")
+            except ValueError as e:
+                return bad(handler, str(e))
+            try:
+                sent = post_json("/api/agent-messages", _tok, {
+                    "recipient_profile_id": str(body["recipient_profile_id"]),
+                    "body": str(body["body"]),
+                })
+            except SentryGatewayError as exc:
+                return bad(handler, str(exc), exc.status or 502)
+            return j(handler, sent or {"delivered": True})
+        try:
+            require(body, "id")
+        except ValueError as e:
+            return bad(handler, str(e))
+        import urllib.parse as _up
+        try:
+            marked = post_json(
+                f"/api/agent-messages/{_up.quote(str(body['id']), safe='')}/read",
+                _tok, {},
+            )
+        except SentryGatewayError as exc:
+            return bad(handler, str(exc), exc.status or 502)
+        return j(handler, marked or {"read": True})
+
     if parsed.path == "/api/memory/write":
+        from api.gateway_chat import _gateway_dialect, sentry_access_token_from_handler
+        if _gateway_dialect() == "sentry":
+            # The local handler writes ~/.hermes/memories inside the WebUI
+            # container — a file the per-user Hermes never reads, so a sentry
+            # save "succeeded" into a dead end. Route the write to the
+            # Gateway's per-profile store, which is what the sentry GET reads.
+            _tok = sentry_access_token_from_handler(handler)
+            if not _tok:
+                return _sentry_no_identity(handler)
+            try:
+                require(body, "section", "content")
+            except ValueError as e:
+                return bad(handler, str(e))
+            section = str(body["section"])
+            if section not in {"memory", "user", "soul"}:
+                # project_context is read-only in the panel; anything else has
+                # no pane and would be an invisible write.
+                return bad(handler, f"section {section!r} is not writable here", 400)
+            from api.sentry_gateway_client import SentryGatewayError, put_json
+            try:
+                saved = put_json(
+                    f"/api/memory/{section}", _tok, {"content": str(body["content"])}
+                )
+            except SentryGatewayError as exc:
+                return bad(handler, str(exc), exc.status or 502)
+            return j(handler, {"ok": True, "section": section,
+                               "updated_at": (saved or {}).get("updated_at")})
         return _handle_memory_write(handler, body)
 
     if parsed.path in {"/api/gateway/start", "/api/gateway/stop", "/api/gateway/restart"}:
@@ -17864,6 +18200,9 @@ def handle_patch(handler, parsed) -> bool:
         name = parsed.path[len("/api/mcp/servers/"):]
         return _handle_mcp_server_toggle(handler, name, body)
     if parsed.path.startswith("/api/kanban/"):
+        from api.gateway_chat import _gateway_dialect
+        if _gateway_dialect() == "sentry":
+            return _sentry_kanban_unavailable(handler)
         from api.kanban_bridge import handle_kanban_patch
 
         result = handle_kanban_patch(handler, parsed, body)
@@ -17916,6 +18255,9 @@ def handle_delete(handler, parsed) -> bool:
         return j(handler, {"ok": True})
 
     if parsed.path.startswith("/api/kanban/"):
+        from api.gateway_chat import _gateway_dialect
+        if _gateway_dialect() == "sentry":
+            return _sentry_kanban_unavailable(handler)
         from api.kanban_bridge import handle_kanban_delete
 
         result = handle_kanban_delete(handler, parsed, body)

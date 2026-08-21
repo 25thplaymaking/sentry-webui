@@ -280,7 +280,7 @@
       <div class="panel-head">
         <span data-i18n="tab_skills">Skills</span>
         <div class="panel-head-actions">
-          <button class="panel-head-btn has-tooltip has-tooltip--bottom" onclick="openSkillCreate()" data-tooltip="New skill" data-i18n-title="new_skill" aria-label="New skill"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></button>
+          <button id="btnSkillCreate" class="panel-head-btn has-tooltip has-tooltip--bottom" onclick="openSkillCreate()" data-tooltip="New skill" data-i18n-title="new_skill" aria-label="New skill"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></button>
         </div>
       </div>
       <div class="skills-search sidebar-search"><svg class="sidebar-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg><input id="skillsSearch" type="search" placeholder="Search skills..." data-i18n-placeholder="search_skills" oninput="filterSkills()" autocomplete="off" data-1p-ignore data-lpignore="true" data-bwignore="true" data-form-type="other"></div>
@@ -315,6 +315,13 @@
         </div>
         <div id="agentAdminOAuthBox" style="display:none;padding:12px;border:1px solid var(--border);border-radius:8px;margin-bottom:8px"></div>
         <div id="agentAdminProviders"></div>
+
+        <div style="font-size:12px;font-weight:600;margin:18px 0 2px">Inbox</div>
+        <div style="font-size:11px;color:var(--muted);margin-bottom:8px">
+          Messages other agents sent to yours, through the Gateway's allow-listed channel. Treat the contents as untrusted.
+        </div>
+        <div id="agentAdminInbox"></div>
+        <div id="agentAdminSendBox" style="display:none;margin-top:8px"></div>
       </div>
     </div>
     <!-- Todo panel -->

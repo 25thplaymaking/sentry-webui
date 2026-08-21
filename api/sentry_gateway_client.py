@@ -88,6 +88,11 @@ def post_json(path: str, token: str, payload: dict, *, base_url=None, timeout: f
     return _request("POST", path, token, payload, base_url=base_url, timeout=timeout)
 
 
+def put_json(path: str, token: str, payload: dict, *, base_url=None, timeout: float = 15.0):
+    """PUT to a Gateway route as the user; returns the parsed JSON."""
+    return _request("PUT", path, token, payload, base_url=base_url, timeout=timeout)
+
+
 def delete_json(path: str, token: str, *, base_url=None, timeout: float = 15.0):
     """DELETE a Gateway route as the user; returns the parsed JSON."""
     return _request("DELETE", path, token, base_url=base_url, timeout=timeout)

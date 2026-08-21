@@ -4710,7 +4710,66 @@ function _renderSkillUsage(d) {
   return `<div class="insights-card" id="skillUsageCard"><div class="insights-card-title">${esc(t('insights_skill_usage_title'))}</div><div class="skill-usage-grid" style="margin-bottom:8px"><div><span>${esc(t('insights_skill_usage_total'))}</span><strong>${totalInvocations.toLocaleString()}</strong></div><div><span>${esc(t('insights_skill_usage_skills_used'))}</span><strong>${uniqueUsed}/${skillNames.length}</strong></div></div><div class="insights-table skill-usage-table"><div class="insights-table-head"><span>${esc(t('insights_skill_usage_col_skill'))}</span><span>${esc(t('insights_skill_usage_col_uses'))}</span><span>${esc(t('insights_skill_usage_col_views'))}</span><span>${esc(t('insights_skill_usage_col_patches'))}</span><span>${esc(t('insights_skill_usage_col_share'))}</span></div>${rows}</div><div class="wiki-status-footer" style="margin-top:8px">${esc(t('insights_skill_usage_footer'))}</div></div>`;
 }
 
+function _renderSentryInsights(d, box) {
+  // Sentry dialect: the envelope is the Gateway's per-agent rollup
+  // ({by_model, by_tool, totals, days}) — none of the local-file series
+  // (daily tokens, activity-by-hour, wiki, skill usage) exist for it, and
+  // rendering them as zeros would read as "no activity" rather than "not
+  // measured here". Render only what the Gateway actually reports.
+  const fmtNum = n => Number(n || 0).toLocaleString();
+  const fmtTokens = n => {
+    const value = Number(n || 0);
+    return value >= 1e6 ? (value/1e6).toFixed(1) + 'M' : value >= 1e3 ? (value/1e3).toFixed(1) + 'K' : fmtNum(value);
+  };
+  if (d.insights_unavailable) {
+    box.innerHTML = `<div class="insights-card"><div class="insights-empty">${esc(t('insights_sentry_unavailable'))}</div></div>`;
+    return;
+  }
+  const totals = d.totals || {};
+  const overviewCards = [
+    { label: t('insights_sentry_turns'), value: fmtNum(totals.turns), icon: li('message-square', 18) },
+    { label: t('insights_input_tokens'), value: fmtTokens(totals.input_tokens), icon: li('download', 18) },
+    { label: t('insights_output_tokens'), value: fmtTokens(totals.output_tokens), icon: li('upload', 18) },
+    { label: t('insights_tokens'), value: fmtTokens(totals.total_tokens), icon: li('cpu', 18) },
+  ];
+  const overviewHtml = `<div class="insights-overview">` + overviewCards.map(c =>
+    `<div class="insights-card insights-overview-card"><div class="insights-overview-icon">${c.icon}</div><div class="insights-overview-body"><div class="insights-overview-value">${esc(String(c.value))}</div><div class="insights-overview-label">${esc(c.label)}</div></div></div>`
+  ).join('') + `</div>`;
+
+  const models = Array.isArray(d.by_model) ? d.by_model : [];
+  let modelsHtml;
+  if (models.length) {
+    const maxTok = Math.max(...models.map(m => Number(m.total_tokens || 0)), 1);
+    modelsHtml = `<div class="insights-card"><div class="insights-card-title">${esc(t('insights_models'))}</div><div class="insights-table"><div class="insights-table-head"><span>${esc(t('insights_model_name'))}</span><span>${esc(t('insights_sentry_turns_col'))}</span><span>${esc(t('insights_model_tokens'))}</span><span>${esc(t('insights_model_share'))}</span></div>` +
+      models.map(m => {
+        const share = totals.total_tokens > 0 ? Math.round(Number(m.total_tokens || 0) / totals.total_tokens * 100) : 0;
+        const title = `${m.model} · ${fmtTokens(m.input_tokens)} ${t('insights_input_tokens')} · ${fmtTokens(m.output_tokens)} ${t('insights_output_tokens')}`;
+        return `<div class="insights-table-row"><span class="insights-model-name" title="${esc(m.model)}">${esc(m.model)}</span><span>${fmtNum(m.turns)}</span><span class="insights-model-tokens" title="${esc(title)}">${fmtTokens(m.total_tokens || 0)}</span><span>${share}%</span></div>`;
+      }).join('') + `</div></div>`;
+  } else {
+    modelsHtml = `<div class="insights-card"><div class="insights-card-title">${esc(t('insights_models'))}</div><div class="insights-empty">${esc(t('insights_no_usage_data'))}</div></div>`;
+  }
+
+  const tools = Array.isArray(d.by_tool) ? d.by_tool : [];
+  let toolsHtml = '';
+  if (tools.length) {
+    const maxCalls = Math.max(...tools.map(x => Number(x.calls || 0)), 1);
+    toolsHtml = `<div class="insights-card"><div class="insights-card-title">${esc(t('insights_sentry_tools'))}</div><div class="insights-bars">` +
+      tools.map(r => {
+        const calls = Number(r.calls || 0);
+        const pct = (calls / maxCalls * 100).toFixed(0);
+        return `<div class="insights-bar-row"><span class="insights-bar-label" title="${esc(r.name)}">${esc(r.name)}</span><div class="insights-bar-track"><div class="insights-bar-fill" style="width:${pct}%"></div></div><span class="insights-bar-value">${fmtNum(calls)}</span></div>`;
+      }).join('') + `</div></div>`;
+  }
+
+  const windowNote = d.days
+    ? `<div class="insights-empty" style="margin-top:4px">${esc(t('insights_sentry_window', d.days))}</div>`
+    : '';
+  box.innerHTML = overviewHtml + modelsHtml + toolsHtml + windowNote;
+}
+
 function _renderInsights(d, box, wikiStatus, skillUsage) {
+  if (d && d.source === 'sentry-gateway') { _renderSentryInsights(d, box); return; }
   const fmtNum = n => Number(n || 0).toLocaleString();
   const fmtCost = c => {
     const value = Number(c || 0);
@@ -4858,12 +4917,19 @@ async function clearConversation() {
 }
 
 // ── Skills panel ──
+let _skillsBackend = null; // 'sentry-gateway' when the list is the Gateway's read-only governance view
+
 async function loadSkills() {
   if (_skillsData) { renderSkills(_skillsData); return; }
   const box = $('skillsList');
   try {
     const data = await api('/api/skills');
     _skillsData = data.skills || [];
+    _skillsBackend = data.skills_backend || null;
+    // The Gateway view is read-only by design: skills change through the
+    // agent's own staged writes (Agent panel), never from here.
+    const createBtn = $('btnSkillCreate');
+    if (createBtn) createBtn.style.display = _skillsBackend === 'sentry-gateway' ? 'none' : '';
     // Prune collapsed state to only keep categories present in fresh data,
     // avoiding stale keys when categories are renamed or removed server-side.
     const liveCats = new Set(_skillsData.map(s => s.category || '(general)'));
@@ -4920,14 +4986,20 @@ function renderSkills(skills) {
       const el = document.createElement('div');
       el.className = 'skill-item' + (skill.disabled ? ' disabled' : '');
       el.style.display = collapsed ? 'none' : '';
-      const isDisabled = skill.disabled || false;
+      const sentryView = _skillsBackend === 'sentry-gateway';
+      const isDisabled = sentryView ? skill.enabled === false : (skill.disabled || false);
       const toggle = document.createElement('span');
       toggle.className = 'skill-toggle' + (isDisabled ? '' : ' enabled');
       toggle.title = isDisabled ? t('skill_disabled') : t('skill_enabled');
-      toggle.addEventListener('click', (ev) => {
-        ev.stopPropagation();
-        toggleSkill(skill.name, !isDisabled);
-      });
+      if (!sentryView) {
+        // The Gateway view is governance state, not a switch: the dot shows
+        // whether the skill is active, and flipping it happens through the
+        // agent's staged writes, so no click handler is attached.
+        toggle.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          toggleSkill(skill.name, !isDisabled);
+        });
+      }
       const nameEl = document.createElement('span');
       nameEl.className = 'skill-name';
       nameEl.textContent = skill.name;
@@ -4935,7 +5007,9 @@ function renderSkills(skills) {
       descEl.className = 'skill-desc';
       descEl.textContent = skill.description || '';
       el.append(toggle, nameEl, descEl);
-      el.onclick = () => openSkill(skill.name, el);
+      el.onclick = sentryView
+        ? () => _openSentrySkill(skill, el)
+        : () => openSkill(skill.name, el);
       sec.appendChild(el);
     }
     box.appendChild(sec);
@@ -5061,6 +5135,35 @@ function _setSkillHeaderButtons(mode) {
   else { if (header) header.style.display = 'none';  hide(editBtn); hide(delBtn); hide(cancelBtn); hide(saveBtn); }
 }
 
+function _openSentrySkill(skill, el) {
+  // Sentry dialect: no content is served (skills live with the agent), so the
+  // detail pane shows the governance record instead of fetching a 501.
+  document.querySelectorAll('.skill-item').forEach(e => e.classList.remove('active'));
+  if (el) el.classList.add('active');
+  _skillPreFormDetail = null;
+  _editingSkillName = null;
+  _currentSkillDetail = null;
+  _skillMode = 'read';
+  const body = $('skillDetailBody');
+  const empty = $('skillDetailEmpty');
+  const title = $('skillDetailTitle');
+  if (title) title.textContent = skill.name;
+  if (empty) empty.style.display = 'none';
+  const rows = [
+    [t('sentry_skill_state'), skill.state || (skill.enabled ? 'active' : 'inactive')],
+    [t('sentry_skill_hash'), skill.content_hash || '—'],
+    [t('sentry_skill_created'), skill.created_at ? new Date(skill.created_at).toLocaleString() : '—'],
+  ].map(([k, v]) =>
+    `<div class="insights-table-row" style="grid-template-columns:140px 1fr"><span>${esc(k)}</span><span style="word-break:break-all">${esc(String(v))}</span></div>`
+  ).join('');
+  if (body) {
+    body.style.display = '';
+    body.innerHTML = `<div class="main-view-content"><div class="insights-card"><div class="insights-card-title">${esc(skill.name)}</div><div class="insights-table" style="display:block">${rows}</div><div class="insights-empty" style="margin-top:10px">${esc(t('sentry_skill_readonly_note'))}</div></div></div>`;
+  }
+  _setSkillHeaderButtons('empty');
+  _closeMobileSidebarAfterPanelSelection();
+}
+
 async function openSkill(name, el) {
   // Highlight active skill in the sidebar list
   document.querySelectorAll('.skill-item').forEach(e => e.classList.remove('active'));
@@ -5136,6 +5239,7 @@ function editCurrentSkill() {
 }
 
 function openSkillCreate() {
+  if (_skillsBackend === 'sentry-gateway') { showToast(t('sentry_skill_readonly_note')); return; }
   if (typeof switchPanel === 'function' && _currentPanel !== 'skills') switchPanel('skills');
   _skillPreFormDetail = _currentSkillDetail ? { ..._currentSkillDetail } : null;
   _editingSkillName = null;

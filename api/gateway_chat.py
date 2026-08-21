@@ -503,8 +503,18 @@ def _translate_sentry_event(payload) -> list[tuple[str, dict]]:
         # so the UI shows "processing" forever. Surface them as a visible notice
         # rather than inventing an approval payload shape this dialect has not
         # agreed on -- being seen matters more than being pretty.
-        label = "Approval required" if etype == "approval.required" else "Input required"
-        return [("warning", {"message": f"{label}: {summary}" if summary else label})]
+        if etype == "approval.required":
+            # In this deployment the only approval gates are the agent's staged
+            # memory/skill writes, and those are reviewed in the Agent panel's
+            # queue -- say so, instead of announcing a question with no way to
+            # answer it. (Interactive exec-approval over this dialect would
+            # need the runtime to move to Hermes' runs API; a deliberate
+            # non-goal for now, recorded in docs/HANDOFF.md.)
+            message = (
+                f"Approval required: {summary}" if summary else "Approval required"
+            ) + " — review it in the Agent panel's pending-writes queue."
+            return [("warning", {"message": message})]
+        return [("warning", {"message": f"Input required: {summary}" if summary else "Input required — reply in this chat to continue."})]
 
     return []
 
@@ -573,6 +583,19 @@ def _run_sentry_turn_streaming(
                 continue
             if etype == "turn.completed":
                 completed_summary = str(payload.get("summary") or "")
+                # The Gateway's completion event carries the runtime's real
+                # token counts in evidence (absent keys mean "not observed",
+                # never 0 — the runtime deliberately omits rather than
+                # fabricates). Harvest them so the per-message usage display
+                # stops reading a hardcoded zero.
+                evidence = payload.get("evidence")
+                if isinstance(evidence, dict):
+                    for key in ("input_tokens", "output_tokens", "total_tokens"):
+                        value = evidence.get(key)
+                        if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+                            usage[key] = value
+                    if isinstance(evidence.get("model"), str):
+                        usage["model"] = evidence["model"]
                 continue
             for event_name, event_payload in _translate_sentry_event(payload):
                 if event_name == "token":
