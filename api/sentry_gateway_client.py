@@ -22,6 +22,31 @@ class SentryGatewayError(Exception):
         self.status = status
 
 
+def _http_error_message(exc) -> str:
+    """Best-effort human-readable message from a Gateway error response."""
+    fallback = f"gateway {exc.code}"
+    try:
+        raw = exc.read().decode("utf-8")
+    except Exception:
+        return fallback
+    if not raw:
+        return fallback
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return fallback
+    if isinstance(parsed, dict):
+        detail = parsed.get("detail")
+        if isinstance(detail, str) and detail.strip():
+            return detail.strip()
+        error = parsed.get("error")
+        if isinstance(error, dict):
+            message = error.get("message")
+            if isinstance(message, str) and message.strip():
+                return message.strip()
+    return fallback
+
+
 def _request(method: str, path: str, token: str, payload=None, *, base_url=None, timeout: float = 15.0):
     base = (base_url or _gateway_base_url()).rstrip("/")
     url = f"{base}{path}"
@@ -36,7 +61,13 @@ def _request(method: str, path: str, token: str, payload=None, *, base_url=None,
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             body = resp.read().decode("utf-8")
     except urllib.error.HTTPError as exc:
-        raise SentryGatewayError(f"gateway {exc.code}", status=exc.code) from exc
+        # Carry the Gateway's own message through. Without this every failure
+        # collapses to "gateway <code>", which hides the distinction that
+        # matters most here: 501 means "this Hermes image predates the admin
+        # patch — rebuild it", not "something went wrong, try again".
+        raise SentryGatewayError(
+            _http_error_message(exc), status=exc.code
+        ) from exc
     except urllib.error.URLError as exc:
         raise SentryGatewayError(f"gateway unreachable: {exc.reason}") from exc
     if not body:
@@ -55,3 +86,8 @@ def get_json(path: str, token: str, *, base_url=None, timeout: float = 15.0):
 def post_json(path: str, token: str, payload: dict, *, base_url=None, timeout: float = 15.0):
     """POST to a Gateway route as the user; returns the parsed JSON."""
     return _request("POST", path, token, payload, base_url=base_url, timeout=timeout)
+
+
+def delete_json(path: str, token: str, *, base_url=None, timeout: float = 15.0):
+    """DELETE a Gateway route as the user; returns the parsed JSON."""
+    return _request("DELETE", path, token, base_url=base_url, timeout=timeout)

@@ -5361,11 +5361,33 @@ def apply_cors_preflight_headers(handler) -> None:
 
 
 def _csrf_exempt_path(path: str) -> bool:
-    """Paths that cannot or must not carry a session CSRF token."""
+    """Paths that cannot or must not carry a session CSRF token.
+
+    Everything here is posted by static/login.js from the /login page (plus the
+    browser's own CSP reporter). That page is never given a token: the session
+    CSRF token is injected as __CSRF_TOKEN_JSON__ into the main app shell only
+    ("/" and "/session/..."), so a login-page fetch has nothing to send and
+    would always fail _check_csrf with "token_mismatch" -- surfacing to the user
+    as "Session expired - reload the page" on a session created seconds ago.
+
+    These are safe to exempt for the reason /api/auth/login always was: each is
+    authenticated by a secret in the REQUEST BODY that a cross-origin attacker
+    can neither guess nor read back -- a password, the current password, a
+    recovery code issued out-of-band in Server Control, or a passkey assertion.
+    Blanket-exempting /api/auth/ would NOT be safe (it would cover
+    /api/auth/logout), so this stays an explicit allowlist.
+
+    IF YOU ADD AN ENDPOINT TO static/login.js, ADD IT HERE TOO -- that omission
+    is exactly how the password endpoints below broke.
+    """
     return path in {
         "/api/auth/login",
         "/api/auth/passkey/options",
         "/api/auth/passkey/login",
+        # Sentry dialect: both are rendered by login.js on the login page --
+        # the forced-change form, and lost-password recovery.
+        "/api/auth/password/change",
+        "/api/auth/password/recover",
         "/api/csp-report",
     }
 
@@ -10197,6 +10219,78 @@ _ALT_LOGIN_REFUSED_MSG = (
 )
 
 
+def _sentry_insights_envelope(usage: dict, *, unavailable: bool = False) -> dict:
+    """Shape the Gateway's usage rollup into what the Insights panel reads.
+
+    A model of None is rendered as "unattributed", NOT as "unknown". The old
+    local-data path produced an "unknown" bucket that looked like a real model
+    and quietly absorbed every turn; naming it for what it is (a turn whose
+    model we did not observe) keeps a gap in instrumentation visible.
+    """
+    by_model = usage.get("by_model") if isinstance(usage, dict) else None
+    by_tool = usage.get("by_tool") if isinstance(usage, dict) else None
+    models = []
+    totals = {"turns": 0, "input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+    for row in by_model or []:
+        if not isinstance(row, dict):
+            continue
+        # The Gateway returns bigint sums, which arrive as strings over JSON.
+        def _n(key):
+            try:
+                return int(row.get(key) or 0)
+            except (TypeError, ValueError):
+                return 0
+        entry = {
+            "model": row.get("model") or "unattributed",
+            "turns": _n("turns"),
+            "input_tokens": _n("input_tokens"),
+            "output_tokens": _n("output_tokens"),
+            "total_tokens": _n("total_tokens"),
+        }
+        models.append(entry)
+        for key in totals:
+            totals[key] += entry[key]
+    tools = [
+        {"name": r.get("tool_name"), "calls": r.get("calls")}
+        for r in (by_tool or [])
+        if isinstance(r, dict) and r.get("tool_name")
+    ]
+    return {
+        "source": "sentry-gateway",
+        "days": usage.get("days") if isinstance(usage, dict) else None,
+        "by_model": models,
+        "by_tool": tools,
+        "totals": totals,
+        "insights_unavailable": bool(unavailable),
+    }
+
+
+def _sentry_models_envelope(model_ids, *, unavailable: bool = False) -> dict:
+    """Shape the Gateway's flat alias list into the picker's envelope.
+
+    The picker reads ``groups: [{provider, provider_id, models: [{id,label}]}]``.
+    Aliases are already the operator-facing names configured in Hermes'
+    model_routes, so they are used verbatim as both id and label -- inventing
+    prettier labels here would put a second naming scheme between what the
+    operator configured and what the user picks.
+
+    An empty list yields NO groups on purpose. Emitting a placeholder group
+    would put unreachable options back in the menu, which is the whole defect
+    this path replaced.
+    """
+    models = [{"id": mid, "label": mid} for mid in model_ids]
+    groups = [{"provider": "Sentry", "provider_id": "sentry", "models": models}] if models else []
+    return {
+        "active_provider": "sentry" if models else None,
+        # The Gateway decides the effective default from the profile's own
+        # config; the picker must not assert one the agent has not confirmed.
+        "default_model": "",
+        "groups": groups,
+        "configured_model_badges": {},
+        "models_unavailable": bool(unavailable),
+    }
+
+
 def _sentry_no_identity(handler):
     """401 a sentry-dialect request that carries no per-user Gateway token.
 
@@ -12499,6 +12593,29 @@ def handle_get(handler, parsed) -> bool:
 
     # ── Insights / knowledge status ──
     if parsed.path == "/api/insights":
+        # _handle_insights reads LOCAL WebUI session data. Under the sentry
+        # dialect the turns happen in the Hermes container and this one holds
+        # almost nothing, which is why every turn bucketed as "unknown" and no
+        # tokens were counted. The Gateway records real per-turn usage; ask it.
+        from api.gateway_chat import _gateway_dialect, sentry_access_token_from_handler
+
+        if _gateway_dialect() == "sentry":
+            _tok = sentry_access_token_from_handler(handler)
+            if not _tok:
+                return _sentry_no_identity(handler)
+            from api.sentry_gateway_client import SentryGatewayError, get_json
+
+            _days = 30
+            try:
+                _days = min(max(int(parse_qs(parsed.query).get("days", ["30"])[0]), 1), 365)
+            except (ValueError, TypeError):
+                pass
+            try:
+                _usage = get_json(f"/api/chat/usage?days={_days}", _tok) or {}
+            except SentryGatewayError:
+                return j(handler, _sentry_insights_envelope({}, unavailable=True))
+            return j(handler, _sentry_insights_envelope(_usage))
+
         return _handle_insights(handler, parsed)
     if parsed.path == "/api/project-os/dashboard":
         return _handle_project_os_dashboard(handler, parsed)
@@ -12514,6 +12631,22 @@ def handle_get(handler, parsed) -> bool:
                 except SentryGatewayError:
                     return j(handler, {"tasks": [], "columns": [], "unavailable": True})
             return _sentry_no_identity(handler)
+        if _gateway_dialect() == "sentry":
+            # Only /api/kanban/board exists on the Gateway. The rest of the
+            # board is served by kanban_bridge, which imports hermes_cli -- a
+            # package this container does not ship, because it never loads the
+            # agent. That surfaced as a raw ModuleNotFoundError in the UI, which
+            # reads as a broken deployment rather than an absent feature. Say
+            # what is actually true instead.
+            return j(handler, {
+                "error": "Kanban is not available in this deployment.",
+                "detail": (
+                    "Board data is served by the Sentry Gateway, which currently "
+                    "implements only /api/kanban/board. The remaining endpoints "
+                    "need agent-local state this container does not have."
+                ),
+                "kanban_unavailable": True,
+            }, status=501)
         from api.kanban_bridge import handle_kanban_get
 
         # Only treat an explicit False as "no route matched". None means the
@@ -12627,7 +12760,55 @@ def handle_get(handler, parsed) -> bool:
         j(handler, build_system_health_payload())
         return True
 
+    # The agent's own pending writes and credentials. Sentry-only: both live
+    # inside Hermes, which this container never loads, so there is no local
+    # implementation to fall back to -- an honest "unavailable" is the correct
+    # answer off-dialect rather than a different subsystem's data.
+    if parsed.path.startswith("/api/agent/"):
+        from api.gateway_chat import _gateway_dialect
+
+        if _gateway_dialect() != "sentry":
+            return j(handler, {
+                "available": False,
+                "error": "the agent admin surface requires the Sentry gateway dialect",
+                "status": 501, "items": [], "providers": [],
+            }, status=501)
+
+        from api import sentry_agent_admin
+
+        if parsed.path == "/api/agent/auth/providers":
+            return j(handler, sentry_agent_admin.auth_providers(handler))
+        if parsed.path.startswith("/api/agent/pending/"):
+            _sub = parsed.path[len("/api/agent/pending/"):].strip("/")
+            if _sub and "/" not in _sub:
+                return j(handler, sentry_agent_admin.pending_list(handler, _sub))
+        return bad(handler, f"unknown agent admin route: {parsed.path}", status=404)
+
     if parsed.path == "/api/models":
+        # Sentry dialect: the reachable-model registry lives in the Gateway, not
+        # in this container. get_available_models() below discovers by reading
+        # the AGENT's config.yaml, which this container deliberately does not
+        # mount -- so it would fall through to a hardcoded provider catalogue and
+        # offer models that cannot answer while hiding the one that can. Ask the
+        # Gateway instead; it reports exactly what this profile can route to.
+        from api.gateway_chat import _gateway_dialect, sentry_access_token_from_handler
+
+        if _gateway_dialect() == "sentry":
+            _tok = sentry_access_token_from_handler(handler)
+            if not _tok:
+                return _sentry_no_identity(handler)
+            from api.sentry_gateway_client import SentryGatewayError, get_json
+
+            try:
+                _payload = get_json("/api/chat/models", _tok) or {}
+            except SentryGatewayError:
+                # Report the outage. Never substitute the local catalogue: a
+                # transport blip must not silently repopulate the picker with
+                # models this deployment cannot reach.
+                return j(handler, _sentry_models_envelope([], unavailable=True))
+            _ids = [m for m in (_payload.get("models") or []) if isinstance(m, str) and m.strip()]
+            return j(handler, _sentry_models_envelope(_ids))
+
         # Profile-scoping for non-default profiles (#3957) is handled INSIDE
         # get_available_models() — it binds the active profile's env + TLS on
         # the detached rebuild worker (and the legacy synchronous rebuild),
@@ -14286,6 +14467,37 @@ def handle_post(handler, parsed) -> bool:
         if diag:
             diag.finish()
         return proxy_result
+
+    # Agent admin mutations: approve/reject a staged write, or drive an OAuth
+    # login. Placed after the CSRF gate above -- these are state-changing and
+    # must never be reachable cross-origin.
+    if parsed.path.startswith("/api/agent/"):
+        from api.gateway_chat import _gateway_dialect
+
+        if _gateway_dialect() != "sentry":
+            return j(handler, {
+                "available": False,
+                "error": "the agent admin surface requires the Sentry gateway dialect",
+                "status": 501,
+            }, status=501)
+
+        from api import sentry_agent_admin
+
+        try:
+            _agent_body = read_body(handler) or {}
+        except ValueError as exc:
+            return bad(handler, str(exc))
+        if parsed.path == "/api/agent/auth/oauth/start":
+            return j(handler, sentry_agent_admin.auth_oauth_start(handler, _agent_body))
+        if parsed.path == "/api/agent/auth/oauth/complete":
+            return j(handler, sentry_agent_admin.auth_oauth_complete(handler, _agent_body))
+        if parsed.path.startswith("/api/agent/pending/"):
+            _rest = parsed.path[len("/api/agent/pending/"):].strip("/").split("/")
+            if len(_rest) == 3:
+                _sub, _pid, _decision = _rest
+                return j(handler, sentry_agent_admin.pending_decide(
+                    handler, _sub, _pid, _decision))
+        return bad(handler, f"unknown agent admin route: {parsed.path}", status=404)
 
     if parsed.path == "/api/shutdown":
         return _handle_shutdown(handler)
@@ -17165,6 +17377,22 @@ def handle_delete(handler, parsed) -> bool:
     body = read_body(handler)
     if not _guard_request_session_visibility(handler, parsed, body=body, method="DELETE"):
         return True
+    if parsed.path.startswith("/api/agent/auth/providers/"):
+        from api.gateway_chat import _gateway_dialect
+
+        if _gateway_dialect() != "sentry":
+            return j(handler, {
+                "available": False,
+                "error": "the agent admin surface requires the Sentry gateway dialect",
+                "status": 501,
+            }, status=501)
+
+        from api import sentry_agent_admin
+
+        _provider = parsed.path[len("/api/agent/auth/providers/"):].strip("/")
+        return j(handler, sentry_agent_admin.auth_logout(
+            handler, _provider, parsed.query or ""))
+
     if parsed.path.startswith("/api/mcp/servers/"):
         name = parsed.path[len("/api/mcp/servers/"):]
         return _handle_mcp_server_delete(handler, name)

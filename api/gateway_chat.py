@@ -332,6 +332,50 @@ def _translate_sentry_event(payload) -> list[tuple[str, dict]]:
     summary = str(payload.get("summary") or "")
     if etype == "message" and summary:
         return [("token", {"text": summary})]
+
+    if etype == "tool.progress":
+        # The Gateway has always emitted this (its Hermes adapter maps
+        # hermes.tool.started / .finished / .progress onto it). Dropping it here
+        # was the reason a working agent showed nothing but "processing": the
+        # whole chain existed and the last step threw it away.
+        evidence = payload.get("evidence")
+        evidence = evidence if isinstance(evidence, dict) else {}
+        name = ""
+        for key in ("tool", "name", "function_name"):
+            candidate = evidence.get(key)
+            if isinstance(candidate, str) and candidate.strip():
+                name = candidate.strip()
+                break
+        # The evidence dict's shape belongs to the runtime, not to us, so a key
+        # we do not recognise must still produce visible activity. Falling back
+        # to the summary keeps an unfamiliar payload informative instead of
+        # invisible -- silence here is indistinguishable from a hung agent.
+        if not name:
+            name = summary or "tool"
+        status = str(evidence.get("status") or "").strip().lower()
+        is_error = bool(evidence.get("error")) or status in {"error", "failed"}
+        is_complete = status in {"completed", "complete", "success", "error", "failed"}
+        event_payload = {
+            "event_type": "tool.completed" if is_complete else "tool.started",
+            "name": name,
+            "preview": summary or None,
+            "args": evidence.get("args") if isinstance(evidence.get("args"), dict) else {},
+            "is_error": is_error,
+        }
+        tid = evidence.get("tool_call_id") or evidence.get("toolCallId") or evidence.get("id")
+        if tid:
+            event_payload["tid"] = str(tid)
+        return [("tool_complete" if is_complete else "tool", event_payload)]
+
+    if etype in ("approval.required", "needs.input"):
+        # These were dropped by the same line, and that is worse than cosmetic:
+        # the agent blocks waiting for an answer the user was never asked for,
+        # so the UI shows "processing" forever. Surface them as a visible notice
+        # rather than inventing an approval payload shape this dialect has not
+        # agreed on -- being seen matters more than being pretty.
+        label = "Approval required" if etype == "approval.required" else "Input required"
+        return [("warning", {"message": f"{label}: {summary}" if summary else label})]
+
     return []
 
 
@@ -346,6 +390,7 @@ def _run_sentry_turn_streaming(
     cancel_event,
     quoted_context=None,
     timeout=None,
+    model=None,
 ):
     """Bridge one WebUI turn through the Sentry Gateway ``/api/chat/turn``.
 
@@ -363,6 +408,12 @@ def _run_sentry_turn_streaming(
     body: dict[str, Any] = {"prompt": str(msg_text or ""), "session_id": session_id}
     if quoted_context:
         body["quoted_context"] = list(quoted_context)
+    # Only sent when the user actually picked one. Omitting the key keeps the
+    # profile's configured default, and the Gateway REFUSES a model this profile
+    # does not advertise rather than quietly substituting one -- so a stale
+    # picker surfaces as a visible error instead of an answer from elsewhere.
+    if model:
+        body["model"] = str(model)
     req = urllib.request.Request(
         url, data=json.dumps(body).encode("utf-8"), headers=headers, method="POST"
     )
@@ -1042,6 +1093,7 @@ def _run_gateway_chat_streaming(
                     _sentry_turn_token(session_id, gateway_token),
                     put_gateway_event=put_gateway_event,
                     cancel_event=cancel_event,
+                    model=model,
                 )
             except Exception as exc:
                 error_payload = _settle_gateway_terminal_error(
