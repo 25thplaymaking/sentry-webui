@@ -2701,7 +2701,46 @@ function _kanbanUnavailableHtml(err){
   return `<div class="main-view-empty"><div class="main-view-empty-title">${msg}</div></div>`;
 }
 
+let _kanbanRetired = false;
+
+function _retireKanbanPanel(){
+  // A 501 from the kanban routes means this deployment has no board at all
+  // (sentry dialect: the agent exposes no board source). Leaving the search,
+  // filters, dispatcher buttons and task inputs on screen around an
+  // "unavailable" banner reads as a broken app; every one of them can only
+  // 501. Retire the whole surface: hide the nav entries and controls, say
+  // why once, and stop issuing requests.
+  _kanbanRetired = true;
+  _kanbanStopPolling();
+  document.querySelectorAll('[data-panel="kanban"]').forEach(el => { el.style.display = 'none'; });
+  const panel = $('panelKanban');
+  if (panel) {
+    const stack = panel.querySelector('.kanban-filter-stack');
+    if (stack) stack.style.display = 'none';
+    const actions = panel.querySelector('.panel-head-actions');
+    if (actions) actions.style.display = 'none';
+    const summary = $('kanbanSummary');
+    if (summary) summary.style.display = 'none';
+  }
+  const main = $('mainKanban');
+  if (main) {
+    const header = main.querySelector('.main-view-header');
+    if (header) {
+      const title = header.querySelector('.main-view-title');
+      header.querySelectorAll('button, .main-view-actions').forEach(el => {
+        if (!title || !title.contains(el)) el.style.display = 'none';
+      });
+    }
+  }
+  const message = `<div class="main-view-empty"><div class="main-view-empty-title">${esc(t('kanban_retired_title'))}</div><div class="main-view-empty-subtitle">${esc(t('kanban_retired_note'))}</div></div>`;
+  const board = $('kanbanBoard');
+  if (board) board.innerHTML = message;
+  const list = $('kanbanList');
+  if (list) list.innerHTML = `<div style="padding:12px;color:var(--muted);font-size:12px">${esc(t('kanban_retired_note'))}</div>`;
+}
+
 async function loadKanban(animate){
+  if (_kanbanRetired) return;
   const board = $('kanbanBoard');
   const list = $('kanbanList');
   try {
@@ -2749,6 +2788,7 @@ async function loadKanban(animate){
     _kanbanStartPolling();
     _kanbanRenderBoard();
   } catch(e) {
+    if (e && Number(e.status) === 501) { _retireKanbanPanel(); return; }
     const html = _kanbanUnavailableHtml(e);
     if (board) board.innerHTML = html;
     if (list) list.innerHTML = html;
