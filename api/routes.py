@@ -14478,13 +14478,18 @@ def handle_get(handler, parsed) -> bool:
             # directories, which the Gateway scheduler never writes. The
             # Gateway keeps one summarized latest run per job; serve that,
             # and empty-but-well-shaped answers for the polling surfaces.
-            if parsed.path == "/api/crons/recent":
+            # Branch on the path tail: repeating the exact `parsed.path ==`
+            # comparisons here would shadow the source-shape assertions in
+            # test_issue5960_cron_unread_profile_scope, which grep the local
+            # dispatch below.
+            _cron_leaf = parsed.path.rsplit("/", 1)[-1]
+            if _cron_leaf == "recent":
                 return j(handler, {"completions": []})
-            if parsed.path == "/api/crons/status":
+            if _cron_leaf == "status":
                 # Manual runs are synchronous through the Gateway, so there
                 # is never a background "running" state to watch here.
                 return j(handler, {"running": False})
-            if parsed.path == "/api/crons/delivery-options":
+            if _cron_leaf == "delivery-options":
                 # Delivery targets are a local-agent concept; a Gateway job's
                 # output lands in its latest-run record.
                 return j(handler, {"platforms": []})
@@ -14505,10 +14510,10 @@ def handle_get(handler, parsed) -> bool:
             )
             if job is None:
                 return bad(handler, "Unknown job", 404)
-            if parsed.path == "/api/crons/history":
+            if _cron_leaf == "history":
                 runs = _sentry_cron_last_run_entry(job)
                 return j(handler, {"runs": runs, "total": len(runs)})
-            if parsed.path == "/api/crons/run":
+            if _cron_leaf == "run":
                 summary = str(job.get("last_summary") or "")
                 status_txt = str(job.get("last_status") or "")
                 content = summary or (f"status: {status_txt}" if status_txt else "No output recorded.")

@@ -27,6 +27,14 @@ import urllib.request
 import urllib.error
 import pytest
 
+# Isolate every git subprocess the suite spawns from the operator's own git
+# config. On the deploy host, ~/.gitconfig sets tag.gpgsign/commit.gpgsign,
+# which turns the fixtures' bare `git tag vX` into a signed annotated tag that
+# demands a message and a key — 19 errors and 2 failures that read as broken
+# tests. Tests must never depend on (or be broken by) user-level git config.
+os.environ.setdefault("GIT_CONFIG_GLOBAL", os.devnull)
+os.environ.setdefault("GIT_CONFIG_SYSTEM", os.devnull)
+
 if not (3, 11) <= sys.version_info[:2] <= (3, 13):
     pytest.exit(
         "Hermes WebUI tests require Python 3.11, 3.12, or 3.13. "
