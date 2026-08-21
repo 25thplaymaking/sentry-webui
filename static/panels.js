@@ -7563,6 +7563,12 @@ async function loadMemory(force) {
     if (_currentMemorySection === 'external_notes') {
       await loadNotesSources(!!force);
     }
+    if (panel && _memoryData.unavailable) {
+      // Sentry dialect with the Gateway unreachable: empty panes here would
+      // read as "you have no notes", which is not what is known.
+      panel.innerHTML = `<div style="padding:12px;color:var(--muted);font-size:12px">${esc(t('sentry_gateway_unavailable'))}</div>`;
+      return;
+    }
     if (panel) {
       panel.innerHTML = '';
       for (const s of MEMORY_SECTIONS) {
