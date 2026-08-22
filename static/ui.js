@@ -4598,12 +4598,34 @@ function renderModelDropdown(){
     const _hit=_modelData.find(m=>m&&!m.endpointErrorOnly&&_isSelectedModelRow(m)) || _modelData.find(m=>m&&!m.endpointErrorOnly&&String(m.value||'')===_selVal);
     return _hit||null;
   })();
-  const _selectedGroupKey=_selectedModelEntry?_selectedModelEntry.groupKey:null;
+  // Configured routes may add a provider-qualified duplicate of the selected
+  // model outside the catalog groups.  Resolve that row back to its catalog
+  // sibling so the owning provider and vendor sections still open by default.
+  const _selectedCatalogEntry=(()=>{
+    if(_selectedModelEntry&&_selectedModelEntry.groupKey) return _selectedModelEntry;
+    const selectedValue=String((_selectedModelState&&_selectedModelState.model)||(sel&&sel.value)||'');
+    if(!selectedValue) return null;
+    const providerHint=String(
+      (_selectedModelEntry&&_selectedModelEntry.badge&&_selectedModelEntry.badge.provider)
+      ||(_selectedModelState&&_selectedModelState.model_provider)
+      ||''
+    ).toLowerCase();
+    const grouped=_modelData.filter(m=>m&&m.groupKey&&!m.endpointErrorOnly);
+    const ownsHint=(m)=>!providerHint||[m.groupKey,m.providerId].some(value=>String(value||'').toLowerCase()===providerHint);
+    const exact=grouped.find(m=>ownsHint(m)&&String(m.value||'')===selectedValue)
+      ||grouped.find(m=>String(m.value||'')===selectedValue);
+    if(exact) return exact;
+    const identity=selectedValue.split('/').pop().replace(/-/g,'.').toLowerCase();
+    return grouped.find(m=>ownsHint(m)&&String(m.value||'').split('/').pop().replace(/-/g,'.').toLowerCase()===identity)
+      ||grouped.find(m=>String(m.value||'').split('/').pop().replace(/-/g,'.').toLowerCase()===identity)
+      ||null;
+  })();
+  const _selectedGroupKey=_selectedCatalogEntry?_selectedCatalogEntry.groupKey:null;
   const _selectedVendorPrefix=(()=>{
-    if(!_selectedModelEntry||!_selectedGroupKey) return '';
-    const direct=_vendorPrefix(_selectedModelEntry.value);
+    if(!_selectedCatalogEntry||!_selectedGroupKey) return '';
+    const direct=_vendorPrefix(_selectedCatalogEntry.value);
     if(direct) return direct;
-    const identity=String(_selectedModelEntry.value||'').split('/').pop().replace(/-/g,'.').toLowerCase();
+    const identity=String(_selectedCatalogEntry.value||'').split('/').pop().replace(/-/g,'.').toLowerCase();
     const sibling=_modelData.find(m=>m&&m.groupKey===_selectedGroupKey&&_vendorPrefix(m.value)
       &&String(m.value||'').split('/').pop().replace(/-/g,'.').toLowerCase()===identity);
     return sibling?_vendorPrefix(sibling.value):'';

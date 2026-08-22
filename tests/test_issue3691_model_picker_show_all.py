@@ -390,6 +390,9 @@ function _providerFromModelValue(v) {
 }
 function _normalizeConfiguredModelKey(v) { return String(v || '').toLowerCase(); }
 function _getConfiguredModelBadge(value, badgeMap) { return badgeMap[value] || null; }
+function _modelStateForSelect(sel) {
+  return {model: sel && sel.value || '', model_provider: payload.selectedProvider || null};
+}
 function closeModelDropdown() {}
 const selectedCalls = [];
 function selectModelFromDropdown(value, provider) { selectedCalls.push({value, provider}); }
@@ -1484,7 +1487,8 @@ def test_runtime_picker_prioritizes_native_models_and_opens_only_selected_nous_v
         "groups": [
             {
                 "provider": "Nous Portal",
-                "provider_id": "nous",
+                "provider_id": "sentry",
+                "group_id": "nous",
                 "models": [
                     {"id": "deepseek-v4-flash", "label": "DeepSeek V4 Flash"},
                     {"id": "deepseek/deepseek-v4-flash", "label": "DeepSeek V4 Flash"},
@@ -1500,7 +1504,8 @@ def test_runtime_picker_prioritizes_native_models_and_opens_only_selected_nous_v
             },
             {
                 "provider": "OpenAI Codex",
-                "provider_id": "openai-codex",
+                "provider_id": "sentry",
+                "group_id": "openai-codex",
                 "native_runtime": "codex",
                 "models": [
                     {"id": "chatgpt-plan/gpt-5.4-mini", "label": "GPT-5.4 Mini"},
@@ -1509,6 +1514,14 @@ def test_runtime_picker_prioritizes_native_models_and_opens_only_selected_nous_v
             },
         ],
         "selectedValue": "deepseek-v4-flash",
+        "selectedProvider": "nous",
+        "configuredBadges": {
+            "deepseek-v4-flash": {
+                "provider": "nous",
+                "role": "primary",
+                "label": "Primary",
+            }
+        },
         "searchTerm": "",
         "exerciseKeyboard": True,
     }
@@ -1552,7 +1565,7 @@ def test_runtime_picker_prioritizes_native_models_and_opens_only_selected_nous_v
         "ariaCurrent": "false",
     }
     assert out["selectedCalls"] == [
-        {"value": "chatgpt-plan/gpt-5.4-mini", "provider": "openai-codex"}
+        {"value": "deepseek-v4-flash", "provider": "nous"}
     ]
 
 
