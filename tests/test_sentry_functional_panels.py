@@ -55,9 +55,9 @@ def test_sentry_settings_hide_shared_container_controls_and_route_accounts_to_ag
     assert "DeepSeek remains the default assistant" in PANELS
     assert "settingsShowCliSessions" in PANELS
     assert "settingsLargeTextPasteAsAttachment" in PANELS
-    assert "hide_composer_attach" in PANELS
+    assert "const unavailable=new Set(['hide_composer_workspace','hide_composer_reasoning'])" in PANELS
     assert '[data-sentry-product="true"] .sentry-product-hidden' in CSS
-    assert '[data-sentry-product="true"] #btnAttach' in CSS
+    assert '[data-sentry-product="true"] #btnAttach' not in CSS
     assert '[data-sentry-product="true"] #composerReasoningWrap' in CSS
 
 

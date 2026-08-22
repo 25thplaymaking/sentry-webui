@@ -11707,6 +11707,20 @@ function syncExperienceBar(){
     if(enabled) document.body.dataset.sentryProduct='true';
     else document.body.removeAttribute('data-sentry-product');
   }
+  const fileInput=$('fileInput');
+  const attachButton=$('btnAttach');
+  const dropHintText=$('dropHintText');
+  if(fileInput){
+    if(!fileInput.dataset.defaultAccept) fileInput.dataset.defaultAccept=fileInput.accept;
+    fileInput.accept=enabled?'image/png,image/jpeg,image/gif,image/webp':fileInput.dataset.defaultAccept;
+  }
+  if(attachButton){
+    const label=enabled?'Attach images':'Attach files';
+    attachButton.dataset.tooltip=label;
+    attachButton.title=label;
+    attachButton.setAttribute('aria-label',label);
+  }
+  if(dropHintText) dropHintText.textContent=enabled?'Drop images to attach':'Drop files to attach';
   if(enabled&&typeof syncPanelOrientation==='function'){
     syncPanelOrientation(typeof _currentPanel==='string'?_currentPanel:'chat');
   }
@@ -22381,11 +22395,32 @@ function _showUploadTooLarge(file){
   else if(typeof showToast==='function')showToast(message,5000,'error');
 }
 function addFiles(files){
+  const sentryMode=!!(document.body&&document.body.dataset.sentryProduct==='true');
+  const sentryImageTypes=new Set(['image/png','image/jpeg','image/gif','image/webp']);
+  let sentryBytes=sentryMode?(S.pendingFiles||[]).reduce((sum,file)=>sum+((file&&file.size)||0),0):0;
+  const accepted=[];
   for(const f of files){
     if(f&&f.size>MAX_UPLOAD_BYTES){_showUploadTooLarge(f);continue;}
-    if(!S.pendingFiles.find(p=>p.name===f.name))S.pendingFiles.push(f);
+    if(sentryMode&&!(f&&sentryImageTypes.has(String(f.type||'').toLowerCase()))){
+      setStatus('\u274c Sentry attachments support PNG, JPEG, GIF, and WebP images.');
+      continue;
+    }
+    if(sentryMode&&S.pendingFiles.length>=5){
+      setStatus('\u274c You can attach up to five images per message.');
+      continue;
+    }
+    if(sentryMode&&sentryBytes+((f&&f.size)||0)>MAX_UPLOAD_BYTES){
+      setStatus('\u274c Images may total at most '+MAX_UPLOAD_MB+' MB per message.');
+      continue;
+    }
+    if(!S.pendingFiles.find(p=>p.name===f.name)){
+      S.pendingFiles.push(f);
+      accepted.push(f);
+      if(sentryMode)sentryBytes+=((f&&f.size)||0);
+    }
   }
   renderTray();
+  return accepted;
 }
 const _uploadPendingFilesProgressBySession=new Map();
 function _uploadPendingFilesCurrentSession(sessionId){

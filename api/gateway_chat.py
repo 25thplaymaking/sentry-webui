@@ -806,6 +806,7 @@ def _run_sentry_turn_streaming(
     experience="work",
     workspace_id=None,
     native_options=None,
+    images=None,
 ):
     """Bridge one WebUI turn through the Sentry Gateway ``/api/chat/turn``.
 
@@ -840,6 +841,8 @@ def _run_sentry_turn_streaming(
         body["workspace_id"] = str(workspace_id)
     if native_options:
         body["native_options"] = dict(native_options)
+    if images:
+        body["images"] = list(images)
     req = urllib.request.Request(
         url, data=json.dumps(body).encode("utf-8"), headers=headers, method="POST"
     )
@@ -906,6 +909,38 @@ def _run_sentry_turn_streaming(
             STREAM_PARTIAL_TEXT[stream_id] += completed_summary
         put_gateway_event("token", {"text": completed_summary})
     return final_text, usage
+
+
+def _sentry_image_inputs(attachments, workspace: str) -> list[dict[str, str]]:
+    """Read validated local image uploads into the Sentry turn contract.
+
+    Reuse the existing attachment-root/workspace confinement, size, MIME, and
+    magic-byte checks instead of creating a second file-reading trust boundary.
+    The authenticated Gateway validates the resulting data URLs again.
+    """
+    if not attachments:
+        return []
+    from api.streaming import _build_native_multimodal_message
+
+    content = _build_native_multimodal_message(
+        "", "", attachments, str(workspace), cfg=None
+    )
+    if not isinstance(content, list):
+        return []
+    images = []
+    for part in content:
+        if not isinstance(part, dict) or part.get("type") != "image_url":
+            continue
+        image_url = part.get("image_url")
+        data_url = image_url.get("url") if isinstance(image_url, dict) else None
+        if isinstance(data_url, str) and data_url.startswith((
+            "data:image/png;base64,",
+            "data:image/jpeg;base64,",
+            "data:image/gif;base64,",
+            "data:image/webp;base64,",
+        )):
+            images.append({"data_url": data_url})
+    return images[:5]
 
 
 def _gateway_reasoning_effort_for_request(cfg, *, model=None, model_provider=None):
@@ -1664,22 +1699,16 @@ def _run_gateway_chat_streaming(
             logger.debug("Failed to load WebUI gateway prefill context", exc_info=True)
             prefill_messages = []
         if dialect == "sentry":
+            sentry_images = _sentry_image_inputs(attachments, str(workspace))
             if attachments:
-                # The Gateway's /api/chat/turn carries no attachment field, so
-                # anything attached here never reaches the agent. The transcript
-                # still renders the attachment, which made the drop invisible —
-                # say it in the stream instead of failing the whole turn.
-                names = ", ".join(
-                    str((a or {}).get("name") or (a or {}).get("filename") or "attachment")
-                    for a in attachments[:5]
-                ) or "attachment"
-                put_gateway_event("warning", {
-                    "message": (
-                        f"Not sent to the agent: {names}. This deployment's "
-                        "agent cannot receive files yet — paste the relevant "
-                        "content as text instead."
-                    ),
-                })
+                skipped = max(0, len(attachments) - len(sentry_images))
+                if skipped:
+                    put_gateway_event("warning", {
+                        "message": (
+                            f"{skipped} attachment(s) were not sent. Sentry accepts "
+                            "up to five valid PNG, JPEG, GIF, or WebP images per turn."
+                        ),
+                    })
             try:
                 final_text, usage = _run_sentry_turn_streaming(
                     session_id,
@@ -1694,6 +1723,7 @@ def _run_gateway_chat_streaming(
                     experience=getattr(s, "experience", "work"),
                     workspace_id=getattr(s, "native_workspace_id", None),
                     native_options=getattr(s, "native_runtime_options", None),
+                    images=sentry_images,
                 )
             except Exception as exc:
                 error_payload = _settle_gateway_terminal_error(

@@ -2604,8 +2604,8 @@ function _largeTextPasteFitsUploadLimit(file){
   return !(file&&typeof MAX_UPLOAD_BYTES==='number'&&file.size>MAX_UPLOAD_BYTES);
 }
 function _attachLargePastedText(file){
-  addFiles([file]);
-  if(typeof setStatus==='function')setStatus(t('text_pasted')+file.name);
+  const accepted=addFiles([file])||[file];
+  if(accepted.length&&typeof setStatus==='function')setStatus(t('text_pasted')+file.name);
   return file;
 }
 $('msg').addEventListener('paste',e=>{
@@ -2626,8 +2626,8 @@ $('msg').addEventListener('paste',e=>{
       const suffix=imageItems.length>1?`-${idx+1}`:'';
       return new File([blob],`screenshot-${pasteTs}${suffix}.${ext}`,{type:i.type});
     });
-    addFiles(files);
-    setStatus(t('image_pasted')+files.map(f=>f.name).join(', '));
+    const accepted=addFiles(files)||files;
+    if(accepted.length)setStatus(t('image_pasted')+accepted.map(f=>f.name).join(', '));
     return;
   }
   const plainText=e.clipboardData?.getData('text/plain')||'';

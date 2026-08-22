@@ -8691,7 +8691,7 @@ function _renderComposerControlChips(){
   if(!container) return;
   let defs=Array.isArray(window._COMPOSER_CONTROL_TOGGLE_DEFS)?window._COMPOSER_CONTROL_TOGGLE_DEFS:[];
   if(_isSentryProductMode()){
-    const unavailable=new Set(['hide_composer_attach','hide_composer_workspace','hide_composer_reasoning']);
+    const unavailable=new Set(['hide_composer_workspace','hide_composer_reasoning']);
     defs=defs.filter(def=>def&&!unavailable.has(def.key));
   }
   const state=window._composerControlVisibility||{};

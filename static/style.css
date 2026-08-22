@@ -5059,9 +5059,6 @@ body.resizing .sidebar{transition:none!important;}
 .experience-enabled #composerToolsetsWrap{display:none!important;}
 [data-sentry-product="true"] .composer-ws-wrap,
 [data-sentry-product="true"] #composerMobileWorkspaceAction,
-[data-sentry-product="true"] #btnAttach,
-[data-sentry-product="true"] #attachTray,
-[data-sentry-product="true"] #dropHint,
 [data-sentry-product="true"] #composerReasoningWrap,
 [data-sentry-product="true"] #composerMobileReasoningAction,
 [data-sentry-product="true"] #btnWorkspacePanelEdgeToggle,
