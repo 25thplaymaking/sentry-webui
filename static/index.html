@@ -514,15 +514,15 @@
       <div class="native-runtime-identity">
         <span class="native-runtime-dot" aria-hidden="true"></span>
         <strong>Codex Work</strong>
-        <span class="native-runtime-status" id="nativeRuntimeStatus"></span>
+        <span class="native-runtime-status" id="nativeRuntimeStatus" role="status" aria-live="polite"></span>
       </div>
       <label class="native-workspace-control" for="nativeWorkspaceSelect">
-        <span>On your machine</span>
-        <select id="nativeWorkspaceSelect" onchange="selectNativeWorkspace(this.value)" aria-label="Local Codex workspace"></select>
+        <span>Workspace on your machine</span>
+        <select id="nativeWorkspaceSelect" onchange="selectNativeWorkspace(this.value)" aria-label="Local Codex workspace" aria-describedby="nativeRuntimeStatus"></select>
       </label>
       <div class="native-runtime-features-wrap">
-        <button type="button" class="native-runtime-features-btn" id="nativeRuntimeFeaturesBtn" aria-expanded="false" aria-controls="nativeRuntimeFeatures" onclick="toggleNativeRuntimeFeatures(event)">Codex features <span aria-hidden="true">⌄</span></button>
-        <div class="native-runtime-features" id="nativeRuntimeFeatures" role="dialog" aria-label="Native Codex features" hidden></div>
+        <button type="button" class="native-runtime-features-btn" id="nativeRuntimeFeaturesBtn" aria-expanded="false" aria-controls="nativeRuntimeFeatures" onclick="toggleNativeRuntimeFeatures(event)">Codex features <svg class="native-runtime-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg></button>
+        <div class="native-runtime-features" id="nativeRuntimeFeatures" role="region" aria-label="Native Codex features" aria-hidden="true" tabindex="-1" hidden></div>
       </div>
     </div>
     <div class="messages-shell">
@@ -745,7 +745,7 @@
               <svg id="composerMobileCtxRing" viewBox="0 0 36 36" width="24" height="24" style="display:block;overflow:visible;transform:rotate(-90deg)" aria-hidden="true"><circle cx="18" cy="18" r="14" fill="none" stroke="currentColor" stroke-width="3.5" opacity="0.2"/><circle id="ctx-arc" cx="18" cy="18" r="14" fill="none" stroke="#22c55e" stroke-width="3.5" stroke-dasharray="87.96 87.96" stroke-dashoffset="87.96" stroke-linecap="round"/><text id="ctx-num" x="18" y="18" text-anchor="middle" dominant-baseline="middle" style="transform:rotate(90deg);transform-origin:18px 18px;font-size:9px;font-weight:700;fill:currentColor;stroke:none">0</text></svg>
             </button>
             <div class="composer-model-wrap">
-              <button class="composer-model-chip" id="composerModelChip" type="button" onclick="toggleModelDropdown()" title="Conversation model">
+              <button class="composer-model-chip" id="composerModelChip" type="button" onclick="toggleModelDropdown()" title="Conversation model" aria-haspopup="dialog" aria-expanded="false" aria-controls="composerModelDropdown">
                 <span class="composer-model-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M15 2v2"/><path d="M15 20v2"/><path d="M2 15h2"/><path d="M2 9h2"/><path d="M20 15h2"/><path d="M20 9h2"/><path d="M9 2v2"/><path d="M9 20v2"/></svg></span>
                 <span class="composer-model-label" id="composerModelLabel"></span>
                 <span class="composer-model-chevron" aria-hidden="true"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></span>
@@ -825,7 +825,7 @@
               <span class="composer-workspace-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></span>
               <span class="composer-mobile-config-copy"><span class="composer-mobile-config-kicker" data-i18n="composer_mobile_workspace">Workspace</span><span class="composer-mobile-config-value" id="composerMobileWorkspaceLabel"></span></span>
             </button>
-            <button class="composer-mobile-config-action" id="composerMobileModelAction" type="button" onclick="toggleModelDropdown()" title="Conversation model">
+            <button class="composer-mobile-config-action" id="composerMobileModelAction" type="button" onclick="toggleModelDropdown()" title="Conversation model" aria-haspopup="dialog" aria-expanded="false" aria-controls="composerModelDropdown">
               <span class="composer-model-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M15 2v2"/><path d="M15 20v2"/><path d="M2 15h2"/><path d="M2 9h2"/><path d="M20 15h2"/><path d="M20 9h2"/><path d="M9 2v2"/><path d="M9 20v2"/></svg></span>
               <span class="composer-mobile-config-copy"><span class="composer-mobile-config-kicker" data-i18n="composer_mobile_model">Model</span><span class="composer-mobile-config-value" id="composerMobileModelLabel"></span></span>
             </button>
@@ -870,7 +870,7 @@
               <button type="button" class="toolsets-action-btn toolsets-clear-btn" id="toolsetsClearBtn">Clear (global)</button>
             </div>
           </div>
-          <div class="model-dropdown" id="composerModelDropdown"></div>
+          <div class="model-dropdown" id="composerModelDropdown" aria-hidden="true"></div>
         </div>
         <div class="upload-bar-wrap" id="uploadBarWrap"><div class="upload-bar" id="uploadBar"></div></div>
       </div>
@@ -1249,10 +1249,10 @@
             <div class="settings-field">
               <label for="settingsModelChip" data-i18n="settings_label_model">Default Model</label>
               <div class="model-advanced-row">
-                <button type="button" id="settingsModelChip" class="settings-model-chip" aria-haspopup="listbox" aria-expanded="false">Default Model</button>
+                <button type="button" id="settingsModelChip" class="settings-model-chip" aria-haspopup="dialog" aria-expanded="false" aria-controls="settingsModelDropdown">Default Model</button>
                 <select id="settingsModel" style="width:100%;padding:8px;background:var(--code-bg);color:var(--text);border:1px solid var(--border2);border-radius:6px"></select>
                 <button type="button" id="mainAdvancedBtn" class="model-advanced-btn" title="Advanced options" aria-label="Advanced options for main model"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
-                <div class="model-dropdown settings-model-dropdown" id="settingsModelDropdown"></div>
+                <div class="model-dropdown settings-model-dropdown" id="settingsModelDropdown" aria-hidden="true"></div>
               </div>
               <div style="font-size:11px;color:var(--muted);margin-top:4px" data-i18n="settings_desc_model">Used for new conversations. Existing conversations keep their selected model.</div>
             </div>

@@ -313,10 +313,14 @@ function makeSelect(groups, selectedValue) {
     const og = makeNode('optgroup');
     og.label = group.provider || '';
     og.dataset.provider = group.provider_id || '';
+    if (group.group_id) og.dataset.groupId = group.group_id;
+    if (group.native_runtime) og.dataset.nativeRuntime = group.native_runtime;
     og._ownerSelect = sel;
     if (group.extra_models) og.dataset.extraModels = JSON.stringify(group.extra_models);
     for (const model of group.models || []) {
-      og.appendChild(makeOption(model.id, model.label || model.id, og));
+      const opt = makeOption(model.id, model.label || model.id, og);
+      if (model.native_runtime) opt.dataset.nativeRuntime = model.native_runtime;
+      og.appendChild(opt);
     }
     sel.children.push(og);
     sel.options.push(...og.children);
@@ -335,6 +339,12 @@ function snapshot(dd) {
         className: child.className,
         textContent: child.textContent,
         html: child._innerHTML || '',
+        display: child.style && child.style.display || '',
+        role: child.role || '',
+        ariaExpanded: child['aria-expanded'] || '',
+        ariaCurrent: child['aria-current'] || '',
+        tabIndex: child.tabIndex,
+        dataset: {...(child.dataset || {})},
       });
       if (child.children && child.children.length) walk(child);
     }
@@ -381,7 +391,8 @@ function _providerFromModelValue(v) {
 function _normalizeConfiguredModelKey(v) { return String(v || '').toLowerCase(); }
 function _getConfiguredModelBadge(value, badgeMap) { return badgeMap[value] || null; }
 function closeModelDropdown() {}
-function selectModelFromDropdown() {}
+const selectedCalls = [];
+function selectModelFromDropdown(value, provider) { selectedCalls.push({value, provider}); }
 
 for (const name of [
   '_readModelOverflowData',
@@ -398,14 +409,46 @@ const initial = snapshot(dropdown);
 // so search the whole subtree rather than only direct children.
 const initialShowAllRow = findInTree(dropdown, node => String(node._innerHTML || '').includes('Show all'));
 const searchInput = dropdown.children[1].querySelector('.model-search-input');
-searchInput.value = payload.searchTerm;
+searchInput.value = payload.searchTerm || '';
 searchInput._listeners.input();
 const searched = snapshot(dropdown);
-initialShowAllRow.onclick({ stopPropagation() {} });
+if (initialShowAllRow) initialShowAllRow.onclick({ stopPropagation() {} });
 const searchInputAfterExpand = dropdown.children[1].querySelector('.model-search-input');
 searchInputAfterExpand.value = '';
 searchInputAfterExpand._listeners.input();
 const expanded = snapshot(dropdown);
+
+let keyboardSubgroup = null;
+let keyboardModel = null;
+if (payload.exerciseKeyboard) {
+  const closedSubgroup = findInTree(dropdown, node =>
+    node.classList && node.classList.contains('sub') &&
+    node.classList.contains('collapsible') && node['aria-expanded'] === 'false'
+  );
+  if (closedSubgroup && closedSubgroup._listeners.keydown) {
+    closedSubgroup._listeners.keydown({
+      key: 'Enter',
+      preventDefault() {},
+      stopPropagation() {},
+    });
+    keyboardSubgroup = {
+      textContent: closedSubgroup.textContent,
+      ariaExpanded: closedSubgroup['aria-expanded'] || '',
+    };
+  }
+  const modelRow = findInTree(dropdown, node =>
+    node.classList && node.classList.contains('model-opt') &&
+    !node.classList.contains('model-opt-more')
+  );
+  if (modelRow && modelRow._listeners.keydown) {
+    modelRow._listeners.keydown({key: ' ', preventDefault() {}});
+    keyboardModel = {
+      role: modelRow.role || '',
+      tabIndex: modelRow.tabIndex,
+      ariaCurrent: modelRow['aria-current'] || '',
+    };
+  }
+}
 
 process.stdout.write(JSON.stringify({
   initial,
@@ -413,6 +456,9 @@ process.stdout.write(JSON.stringify({
   expanded,
   optionCountAfterExpand: modelSelect.children[0].children.length,
   hiddenDatasetAfterExpand: modelSelect.children[0].dataset.extraModels || '',
+  keyboardSubgroup,
+  keyboardModel,
+  selectedCalls,
 }));
 """
 
@@ -1428,6 +1474,86 @@ def test_runtime_picker_shows_generic_expander_and_searches_hidden_overflow(_dro
     assert out["hiddenDatasetAfterExpand"] == "[]", (
         "After expansion the optgroup should no longer advertise a hidden overflow tail."
     )
+
+
+@pytest.mark.skipif(NODE is None, reason="node not on PATH")
+def test_runtime_picker_prioritizes_native_models_and_opens_only_selected_nous_vendor(
+    _dropdown_driver_path,
+):
+    payload = {
+        "groups": [
+            {
+                "provider": "Nous Portal",
+                "provider_id": "nous",
+                "models": [
+                    {"id": "deepseek-v4-flash", "label": "DeepSeek V4 Flash"},
+                    {"id": "deepseek/deepseek-v4-flash", "label": "DeepSeek V4 Flash"},
+                    {"id": "deepseek/deepseek-r1", "label": "DeepSeek R1"},
+                    {"id": "openai/gpt-5.4", "label": "GPT-5.4"},
+                    {"id": "openai/o3", "label": "o3"},
+                    {"id": "anthropic/claude-sonnet", "label": "Claude Sonnet"},
+                    {"id": "anthropic/claude-opus", "label": "Claude Opus"},
+                    {"id": "google/gemini-pro", "label": "Gemini Pro"},
+                    {"id": "google/gemini-flash", "label": "Gemini Flash"},
+                    {"id": "qwen/qwen3", "label": "Qwen 3"},
+                ],
+            },
+            {
+                "provider": "OpenAI Codex",
+                "provider_id": "openai-codex",
+                "native_runtime": "codex",
+                "models": [
+                    {"id": "chatgpt-plan/gpt-5.4-mini", "label": "GPT-5.4 Mini"},
+                    {"id": "chatgpt-plan/gpt-5.4", "label": "GPT-5.4"},
+                ],
+            },
+        ],
+        "selectedValue": "deepseek-v4-flash",
+        "searchTerm": "",
+        "exerciseKeyboard": True,
+    }
+
+    out = _run_dropdown_driver(_dropdown_driver_path, payload)
+    provider_headings = [
+        item
+        for item in out["initial"]
+        if "model-group" in item["className"].split()
+        and "collapsible" in item["className"].split()
+        and "sub" not in item["className"].split()
+    ]
+    assert provider_headings[0]["textContent"].startswith("OpenAI Codex"), (
+        "A linked native runtime must be reachable before a large account catalog, "
+        "without changing the selected DeepSeek model."
+    )
+
+    subgroup_headings = {
+        item["textContent"]: item
+        for item in out["initial"]
+        if "sub" in item["className"].split()
+        and "collapsible" in item["className"].split()
+    }
+    assert subgroup_headings["deepseek"]["ariaExpanded"] == "true"
+    assert subgroup_headings["openai"]["ariaExpanded"] == "false"
+    assert subgroup_headings["anthropic"]["ariaExpanded"] == "false"
+
+    subgroup_bodies = {
+        item["dataset"].get("group", ""): item
+        for item in out["initial"]
+        if "model-group-body" in item["className"].split()
+        and "sub" in item["className"].split()
+    }
+    assert subgroup_bodies["nous::deepseek"]["display"] == ""
+    assert subgroup_bodies["nous::openai"]["display"] == "none"
+
+    assert out["keyboardSubgroup"]["ariaExpanded"] == "true"
+    assert out["keyboardModel"] == {
+        "role": "button",
+        "tabIndex": 0,
+        "ariaCurrent": "false",
+    }
+    assert out["selectedCalls"] == [
+        {"value": "chatgpt-plan/gpt-5.4-mini", "provider": "openai-codex"}
+    ]
 
 
 @pytest.mark.skipif(NODE is None, reason="node not on PATH")

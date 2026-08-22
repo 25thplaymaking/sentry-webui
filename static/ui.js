@@ -4288,6 +4288,8 @@ function renderModelDropdown(){
   const dd=$(opts.dropdownId||'composerModelDropdown');
   const sel=$(opts.selectId||'modelSelect');
   if(!dd||!sel) return;
+  dd.setAttribute('role','dialog');
+  dd.setAttribute('aria-label',opts.dialogLabel||'Choose conversation model');
   if(typeof _deduplicateModelPickerOptions==='function') _deduplicateModelPickerOptions(sel,sel.value);
   // Whether the search input should auto-grab focus on (re-)render. Default true
   // preserves the composer picker's behavior exactly; the settings picker passes
@@ -4420,7 +4422,7 @@ function renderModelDropdown(){
   _scopeNote.textContent=opts.scopeNoteText||window._modelScopeNote||(t('model_scope_advisory')||'Applies to this conversation from your next message.');
   const _searchRow=document.createElement('div');
   _searchRow.className='model-search-row';
-  _searchRow.innerHTML=`<input class="model-search-input" type="text" placeholder="${esc(t('model_search_placeholder')||'Search models…')}" spellcheck="false" autocomplete="off"><button class="model-search-clear" title="Clear search">${li('x',10)}</button>`;
+  _searchRow.innerHTML=`<input class="model-search-input" type="text" aria-label="Search available models" placeholder="${esc(t('model_search_placeholder')||'Search models…')}" spellcheck="false" autocomplete="off"><button class="model-search-clear" type="button" title="Clear search" aria-label="Clear model search">${li('x',10)}</button>`;
   const _si=_searchRow.querySelector('.model-search-input');
   const _sc=_searchRow.querySelector('.model-search-clear');
   // Create custom model section elements
@@ -4460,6 +4462,21 @@ function renderModelDropdown(){
     hint.textContent=entry.modelsEndpointError.message||'Models endpoint could not be reached for this provider.';
     (parent||dd).appendChild(hint);
   };
+  const _decorateModelRow=(row,m,onSelect)=>{
+    if(!row) return row;
+    const selected=_isSelectedModelRow(m);
+    row.tabIndex=0;
+    row.setAttribute('role','button');
+    row.setAttribute('aria-current',selected?'true':'false');
+    row.setAttribute('aria-label',`${selected?'Selected model: ':'Use model: '}${String(m&&m.value||m&&m.name||'model')}`);
+    row.onclick=onSelect;
+    row.addEventListener('keydown',e=>{
+      if(e.key!=='Enter'&&e.key!==' ') return;
+      e.preventDefault();
+      onSelect();
+    });
+    return row;
+  };
   // Build a single model-option row (mirrors the main render loop's row markup),
   // used both by the main render and by the in-place overflow reveal below.
   const _buildModelRow=(m,withProviderChip)=>{
@@ -4470,8 +4487,7 @@ function renderModelDropdown(){
     const _plainGroup=m.group?String(m.group).replace(/\s*\(\d+\s+of\s+\d+\)\s*$/,''):'';
     const providerChip=(_plainGroup&&withProviderChip)?`<span class="model-opt-provider">${esc(_plainGroup)}</span>`:'';
     row.innerHTML=`<div class="model-opt-top"><span class="model-opt-name">${esc(m.name)}</span>${badgeHtml}${nativeBadge}${_selectedModelBadge(m)}${providerChip}</div><span class="model-opt-id">${esc(m.id)}</span>`;
-    row.onclick=()=>selectFromDropdown(m.value,m.providerId||(m.badge&&m.badge.provider)||null);
-    return row;
+    return _decorateModelRow(row,m,()=>selectFromDropdown(m.value,m.providerId||(m.badge&&m.badge.provider)||null));
   };
   const _expandOverflowGroup=(groupMetaEntry)=>{
     if(!groupMetaEntry||!groupMetaEntry.optgroup) return;
@@ -4551,6 +4567,7 @@ function renderModelDropdown(){
         const _total=wrap.querySelectorAll('.model-opt').length;
         heading.textContent=_total>1?`${_plainLabel} (${_total})`:_plainLabel;
         heading.classList.add('collapsible','open');
+        heading.setAttribute('aria-expanded','true');
       }
       // Scroll so the first newly-revealed row sits near the top of the dropdown
       // viewport — the user asked to "land on the new models" after Show more,
@@ -4575,12 +4592,34 @@ function renderModelDropdown(){
   // The group that owns the currently-selected model. Groups start COLLAPSED by
   // default (#4279); the selected provider's group is the one exception so the
   // user always sees their active model without expanding anything. (#4279 + UX)
-  const _selectedGroupKey=(()=>{
+  const _selectedModelEntry=(()=>{
     const _selVal=String((sel&&sel.value)||'');
     if(!_selVal) return null;
-    const _hit=_modelData.find(m=>m&&!m.endpointErrorOnly&&_isSelectedModelRow(m)) || _modelData.find(m=>m&&!m.endpointErrorOnly&&String(m.value||'')===_selVal);
-    return _hit?_hit.groupKey:null;
+    return _modelData.find(m=>m&&!m.endpointErrorOnly&&_isSelectedModelRow(m))
+      ||_modelData.find(m=>m&&!m.endpointErrorOnly&&String(m.value||'')===_selVal)
+      ||null;
   })();
+  const _selectedGroupKey=_selectedModelEntry?_selectedModelEntry.groupKey:null;
+  const _selectedVendorPrefix=(()=>{
+    if(!_selectedModelEntry||!_selectedGroupKey) return '';
+    const direct=_vendorPrefix(_selectedModelEntry.value);
+    if(direct) return direct;
+    const identity=String(_selectedModelEntry.value||'').split('/').pop().replace(/-/g,'.').toLowerCase();
+    const sibling=_modelData.find(m=>m&&m.groupKey===_selectedGroupKey&&_vendorPrefix(m.value)
+      &&String(m.value||'').split('/').pop().replace(/-/g,'.').toLowerCase()===identity);
+    return sibling?_vendorPrefix(sibling.value):'';
+  })();
+  const _selectedSubGroupKey=_selectedModelEntry&&_selectedGroupKey
+    ?`${_selectedGroupKey}::${_selectedVendorPrefix}`
+    :null;
+  // Native subscription runtimes are the shortest, highest-intent sections in
+  // Work. Keep them ahead of large catalog accounts without disturbing order
+  // within either class of provider.
+  const _displayGroupOrder=[..._groupOrder].sort((a,b)=>{
+    const _native=(key)=>Boolean(_groupMeta.get(key)?.optgroup?.dataset?.nativeRuntime);
+    const delta=Number(_native(b))-Number(_native(a));
+    return delta||_groupOrder.indexOf(a)-_groupOrder.indexOf(b);
+  });
   const _makeModelRow=(m,shouldRenderHeading)=>{
     const row=document.createElement('div');
     row.className='model-opt'+(_isSelectedModelRow(m)?' active':'');
@@ -4589,8 +4628,7 @@ function renderModelDropdown(){
     const _underOwnHeading=shouldRenderHeading&&!!(m.groupKey&&_groupWrappers[m.groupKey]);
     const providerChip=(_plainGroup&&!_underOwnHeading)?`<span class="model-opt-provider">${esc(_plainGroup)}</span>`:'';
     row.innerHTML=`<div class="model-opt-top"><span class="model-opt-name">${esc(m.name)}</span>${badgeHtml}${_nativeModelBadge(m)}${_selectedModelBadge(m)}${providerChip}</div><span class="model-opt-id">${esc(m.id)}</span>`;
-    row.onclick=()=>selectFromDropdown(m.value,m.providerId||(m.badge&&m.badge.provider)||null);
-    return row;
+    return _decorateModelRow(row,m,()=>selectFromDropdown(m.value,m.providerId||(m.badge&&m.badge.provider)||null));
   };
   const _filterModels=(term)=>{
     // Preserve focus across the re-render if the search input already had it — so a
@@ -4690,11 +4728,10 @@ function renderModelDropdown(){
         }
         const badgeHtml=m.badge?`<span class="model-opt-badge model-opt-badge--${esc(m.badge.role||'configured')}">${esc(badgeLabel)}</span>`:'';
         row.innerHTML=`<div class="model-opt-top"><span class="model-opt-name">${esc(modelName)}</span>${badgeHtml}${_nativeModelBadge(m)}${_selectedModelBadge(m)}</div><span class="model-opt-id">${esc(m.id)}</span>`;
-        row.onclick=()=>selectFromDropdown(m.value,(m.badge&&m.badge.provider)||m.providerId||null);
-        dd.appendChild(row);
+        dd.appendChild(_decorateModelRow(row,m,()=>selectFromDropdown(m.value,(m.badge&&m.badge.provider)||m.providerId||null)));
       }
     }
-    for(const groupKey of _groupOrder){
+    for(const groupKey of _displayGroupOrder){
       const meta=_groupMeta.get(groupKey);
       if(!meta) continue;
       const hiddenCount=_effectiveHiddenCount(groupKey);
@@ -4721,6 +4758,7 @@ function renderModelDropdown(){
         const wrapper=document.createElement('div');
         wrapper.className='model-group-body';
         wrapper.dataset.group=groupKey;
+        wrapper.id=`${dd.id||'model-picker'}-group-${Object.keys(_groupWrappers).length}`;
         // A group carrying a provider endpoint-error hint must stay visible by
         // default — otherwise the "models endpoint unreachable" warning is hidden
         // inside a collapsed body and the user never sees it. (#2540 surface)
@@ -4732,14 +4770,18 @@ function renderModelDropdown(){
         if(!_groupOpenState[groupKey]) wrapper.style.display='none';
         else heading.classList.add('open');
         heading.classList.add('collapsible');
+        heading.tabIndex=0;
+        heading.setAttribute('role','button');
+        heading.setAttribute('aria-controls',wrapper.id);
+        heading.setAttribute('aria-expanded',_groupOpenState[groupKey]?'true':'false');
         dd.appendChild(wrapper);
         _groupWrappers[groupKey]=wrapper;
         // Render the provider endpoint-error hint inside the collapsible group
         // so it collapses/expands with it (the group is force-opened above when
         // an error is present, so the hint stays visible by default).
         _renderProviderEndpointHint(meta,wrapper);
-        heading.addEventListener('click',(e)=>{
-          e.stopPropagation();
+        const _toggleGroup=(e)=>{
+          if(e&&typeof e.stopPropagation==='function') e.stopPropagation();
           const w=dd.querySelector(`.model-group-body[data-group="${CSS.escape(groupKey)}"]`);
           if(!w) return;
           const closed=w.style.display==='none';
@@ -4750,6 +4792,13 @@ function renderModelDropdown(){
           // re-collapse on the next render too.
           if(closed) _forceOpenGroups.add(groupKey); else _forceOpenGroups.delete(groupKey);
           heading.classList.toggle('open',closed);
+          heading.setAttribute('aria-expanded',closed?'true':'false');
+        };
+        heading.addEventListener('click',_toggleGroup);
+        heading.addEventListener('keydown',e=>{
+          if(e.key!=='Enter'&&e.key!==' ') return;
+          e.preventDefault();
+          _toggleGroup(e);
         });
         const useSubGroups=(
           // Sentry routes every linked-account choice through its own gateway,
@@ -4770,10 +4819,11 @@ function renderModelDropdown(){
             if(b[0]==='other') return -1;
             return b[1].length-a[1].length;
           });
+          let _subGroupIndex=0;
           for(const [pfx,pfxRows] of sorted){
             if(pfxRows.length>=2){
               const subKey=`${groupKey}::${pfx}`;
-              if(!(subKey in _groupOpenState)) _groupOpenState[subKey]=true;
+              if(!(subKey in _groupOpenState)) _groupOpenState[subKey]=(subKey===_selectedSubGroupKey);
               if(hasSearch) _groupOpenState[subKey]=true;
               const subHeading=document.createElement('div');
               subHeading.className='model-group sub collapsible';
@@ -4783,13 +4833,25 @@ function renderModelDropdown(){
               const subWrapper=document.createElement('div');
               subWrapper.className='model-group-body sub';
               subWrapper.dataset.group=subKey;
+              subWrapper.id=`${wrapper.id}-sub-${_subGroupIndex++}`;
               if(!_groupOpenState[subKey]) subWrapper.style.display='none';
-              subHeading.addEventListener('click',(e)=>{
-                e.stopPropagation();
+              subHeading.tabIndex=0;
+              subHeading.setAttribute('role','button');
+              subHeading.setAttribute('aria-controls',subWrapper.id);
+              subHeading.setAttribute('aria-expanded',_groupOpenState[subKey]?'true':'false');
+              const _toggleSubGroup=(e)=>{
+                if(e&&typeof e.stopPropagation==='function') e.stopPropagation();
                 const closed=subWrapper.style.display==='none';
                 subWrapper.style.display=closed?'':'none';
                 _groupOpenState[subKey]=closed;
                 subHeading.classList.toggle('open',closed);
+                subHeading.setAttribute('aria-expanded',closed?'true':'false');
+              };
+              subHeading.addEventListener('click',_toggleSubGroup);
+              subHeading.addEventListener('keydown',e=>{
+                if(e.key!=='Enter'&&e.key!==' ') return;
+                e.preventDefault();
+                _toggleSubGroup(e);
               });
               wrapper.appendChild(subHeading);
               wrapper.appendChild(subWrapper);
@@ -4882,6 +4944,14 @@ function renderModelDropdown(){
   _cb.onclick=_applyCustom;
   _ci.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();_applyCustom();}if(e.key==='Escape'){closeDropdown();}});
   _ci.addEventListener('click',e=>e.stopPropagation());
+  dd.onkeydown=e=>{
+    if(e.key!=='Escape') return;
+    e.preventDefault();
+    e.stopPropagation();
+    closeDropdown();
+    const trigger=$(opts.triggerId||(sel.id==='settingsModel'?'settingsModelChip':'composerModelChip'));
+    if(trigger&&typeof trigger.focus==='function') trigger.focus({preventScroll:true});
+  };
   dd.appendChild(_scopeNote);
   dd.appendChild(_searchRow);
   if(!window._modelCatalogRestricted){
@@ -4946,21 +5016,35 @@ async function toggleModelDropdown(){
   if(dd.classList.contains('open')) return;
   renderModelDropdown();
   dd.classList.add('open');
+  dd.setAttribute('aria-hidden','false');
   _positionModelDropdown();
   const activeRow=dd.querySelector('.model-opt.active');
   if(activeRow&&typeof activeRow.scrollIntoView==='function') activeRow.scrollIntoView({block:'nearest'});
   chip.classList.add('active');
+  chip.setAttribute('aria-expanded','true');
   const mobileAction=$('composerMobileModelAction');
-  if(mobileAction) mobileAction.classList.add('active');
+  if(mobileAction){
+    mobileAction.classList.add('active');
+    mobileAction.setAttribute('aria-expanded','true');
+  }
 }
 
 function closeModelDropdown(){
   const dd=$('composerModelDropdown');
   const chip=$('composerModelChip');
   const mobileAction=$('composerMobileModelAction');
-  if(dd) dd.classList.remove('open');
-  if(chip) chip.classList.remove('active');
-  if(mobileAction) mobileAction.classList.remove('active');
+  if(dd){
+    dd.classList.remove('open');
+    dd.setAttribute('aria-hidden','true');
+  }
+  if(chip){
+    chip.classList.remove('active');
+    chip.setAttribute('aria-expanded','false');
+  }
+  if(mobileAction){
+    mobileAction.classList.remove('active');
+    mobileAction.setAttribute('aria-expanded','false');
+  }
   // If the phone path reparented the menu onto <body>, put it back in the
   // footer and clear the fixed-position inline styles so the DOM returns to its
   // baseline shape and the next desktop open anchors correctly (#6080).
@@ -4970,7 +5054,10 @@ function closeModelDropdown(){
 function closeSettingsModelDropdown(){
   const dd=$('settingsModelDropdown');
   const chip=$('settingsModelChip');
-  if(dd) dd.classList.remove('open');
+  if(dd){
+    dd.classList.remove('open');
+    dd.setAttribute('aria-hidden','true');
+  }
   if(chip){
     chip.classList.remove('active');
     chip.setAttribute('aria-expanded','false');
@@ -5022,8 +5109,11 @@ function openSettingsModelDropdown(){
     selectModel:selectSettingsModelFromDropdown,
     scopeNoteText:t('settings_desc_model')||'Used for new conversations. Existing conversations keep their selected model.',
     autoFocusSearch:!_coarsePointer,
+    triggerId:'settingsModelChip',
+    dialogLabel:'Choose default model',
   });
   dd.classList.add('open');
+  dd.setAttribute('aria-hidden','false');
   if(chip){
     chip.classList.add('active');
     chip.setAttribute('aria-expanded','true');
@@ -11098,7 +11188,10 @@ function _nativeWorkspaceIdForNextTurn(runtime){
 function _setNativeRuntimeFeaturesOpen(open){
   const panel=$('nativeRuntimeFeatures');
   const button=$('nativeRuntimeFeaturesBtn');
-  if(panel) panel.hidden=!open;
+  if(panel){
+    panel.hidden=!open;
+    panel.setAttribute('aria-hidden',open?'false':'true');
+  }
   if(button) button.setAttribute('aria-expanded',open?'true':'false');
 }
 function toggleNativeRuntimeFeatures(event){
@@ -11106,6 +11199,22 @@ function toggleNativeRuntimeFeatures(event){
   const panel=$('nativeRuntimeFeatures');
   _setNativeRuntimeFeaturesOpen(Boolean(panel&&panel.hidden));
 }
+document.addEventListener('click',event=>{
+  const panel=$('nativeRuntimeFeatures');
+  const wrap=event&&event.target&&typeof event.target.closest==='function'
+    ?event.target.closest('.native-runtime-features-wrap')
+    :null;
+  if(panel&&!panel.hidden&&!wrap) _setNativeRuntimeFeaturesOpen(false);
+});
+document.addEventListener('keydown',event=>{
+  if(!event||event.key!=='Escape') return;
+  const panel=$('nativeRuntimeFeatures');
+  if(!panel||panel.hidden) return;
+  event.preventDefault();
+  _setNativeRuntimeFeaturesOpen(false);
+  const button=$('nativeRuntimeFeaturesBtn');
+  if(button&&typeof button.focus==='function') button.focus({preventScroll:true});
+});
 function syncNativeRuntimeBar(){
   const bar=$('nativeRuntimeBar');
   const select=$('nativeWorkspaceSelect');
@@ -11123,6 +11232,7 @@ function syncNativeRuntimeBar(){
   if(status){
     const connected=[runtime.node_name,runtime.version].filter(Boolean).join(' · ');
     status.textContent=runtime.available?(connected||'Connected'):String(runtime.reason||'Not connected');
+    status.title=status.textContent;
   }
   const workspaceId=_nativeWorkspaceIdForNextTurn(runtime);
   select.innerHTML='';
@@ -11130,7 +11240,7 @@ function syncNativeRuntimeBar(){
     if(!workspace||!workspace.id) continue;
     const option=document.createElement('option');
     option.value=String(workspace.id);
-    option.textContent=String(workspace.id);
+    option.textContent=String(workspace.label||workspace.name||workspace.id);
     select.appendChild(option);
   }
   if(!select.options.length){
@@ -11171,6 +11281,8 @@ async function selectNativeWorkspace(value){
   if(!S.session) return;
   const previous=S.session.native_workspace_id||null;
   S.session.native_workspace_id=workspaceId;
+  const select=$('nativeWorkspaceSelect');
+  if(select) select.setAttribute('aria-busy','true');
   try{
     const data=await api('/api/session/update',{method:'POST',body:JSON.stringify({
       session_id:S.session.session_id,
@@ -11182,7 +11294,9 @@ async function selectNativeWorkspace(value){
   }catch(error){
     S.session.native_workspace_id=previous;
     syncNativeRuntimeBar();
-    throw error;
+    if(typeof showToast==='function') showToast('Could not update the local Codex workspace. Please try again.',4200);
+  }finally{
+    if(select) select.removeAttribute('aria-busy');
   }
 }
 function syncExperienceBar(){

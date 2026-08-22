@@ -9,6 +9,7 @@ from api.routes import _validate_native_workspace_id
 ROOT = Path(__file__).resolve().parents[1]
 HTML = (ROOT / "static" / "index.html").read_text(encoding="utf-8")
 UI = (ROOT / "static" / "ui.js").read_text(encoding="utf-8")
+CSS = (ROOT / "static" / "style.css").read_text(encoding="utf-8")
 BOOT = (ROOT / "static" / "boot.js").read_text(encoding="utf-8")
 SESSIONS = (ROOT / "static" / "sessions.js").read_text(encoding="utf-8")
 MESSAGES = (ROOT / "static" / "messages.js").read_text(encoding="utf-8")
@@ -58,3 +59,25 @@ def test_native_approvals_and_multi_question_input_use_existing_cards():
     assert "pending.native_questions" in MESSAGES
     assert "native_answers:nativeAnswers" in MESSAGES
     assert "clarify-native-answer" in MESSAGES
+
+
+def test_native_runtime_controls_have_disclosure_and_status_semantics():
+    assert 'id="nativeRuntimeStatus" role="status" aria-live="polite"' in HTML
+    assert 'id="nativeRuntimeFeatures" role="region"' in HTML
+    assert 'aria-controls="nativeRuntimeFeatures"' in HTML
+    assert "panel.setAttribute('aria-hidden',open?'false':'true')" in UI
+    assert "event.key!=='Escape'" in UI
+
+
+def test_native_runtime_controls_are_touch_and_keyboard_friendly():
+    assert ".native-workspace-control select:focus-visible" in CSS
+    assert ".native-runtime-features-btn:focus-visible" in CSS
+    assert ".native-workspace-control select{max-width:none;width:100%;min-height:44px;font-size:16px;}" in CSS
+    assert ".native-runtime-features-btn{min-height:44px" in CSS
+    assert "@media(prefers-reduced-motion:reduce)" in CSS
+
+
+def test_workspace_update_failure_is_visible_to_the_user():
+    assert "Could not update the local Codex workspace" in UI
+    assert "select.setAttribute('aria-busy','true')" in UI
+    assert "select.removeAttribute('aria-busy')" in UI
