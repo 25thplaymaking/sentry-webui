@@ -13242,6 +13242,10 @@ def handle_get(handler, parsed) -> bool:
 
         if parsed.path == "/api/agent/auth/providers":
             return j(handler, sentry_agent_admin.auth_providers(handler))
+        if parsed.path.startswith("/api/agent/auth/oauth/"):
+            _flow_id = parsed.path[len("/api/agent/auth/oauth/"):].strip("/")
+            if _flow_id and "/" not in _flow_id:
+                return j(handler, sentry_agent_admin.auth_oauth_status(handler, _flow_id))
         if parsed.path.startswith("/api/agent/pending/"):
             _sub = parsed.path[len("/api/agent/pending/"):].strip("/")
             if _sub and "/" not in _sub:
@@ -18311,6 +18315,23 @@ def handle_delete(handler, parsed) -> bool:
     body = read_body(handler)
     if not _guard_request_session_visibility(handler, parsed, body=body, method="DELETE"):
         return True
+    if parsed.path.startswith("/api/agent/auth/oauth/"):
+        from api.gateway_chat import _gateway_dialect
+
+        if _gateway_dialect() != "sentry":
+            return j(handler, {
+                "available": False,
+                "error": "the agent admin surface requires the Sentry gateway dialect",
+                "status": 501,
+            }, status=501)
+
+        from api import sentry_agent_admin
+
+        _flow_id = parsed.path[len("/api/agent/auth/oauth/"):].strip("/")
+        if _flow_id and "/" not in _flow_id:
+            return j(handler, sentry_agent_admin.auth_oauth_cancel(handler, _flow_id))
+        return j(handler, {"available": False, "error": "sign-in flow not found"}, status=404)
+
     if parsed.path.startswith("/api/agent/auth/providers/"):
         from api.gateway_chat import _gateway_dialect
 

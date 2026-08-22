@@ -14,6 +14,7 @@
 const AGENT_ADMIN_SUBSYSTEMS = ['memory', 'skills'];
 
 let _agentAdminOAuthFlow = null;   // {flow_id, provider, authorize_url}
+let _agentAdminOAuthPollTimer = null;
 let _agentAdminBusy = false;
 
 function _aaEsc(value) {
@@ -67,13 +68,13 @@ async function _aaFetch(path, options = {}) {
  * is the case worth separating: no amount of retrying fixes a Hermes image that
  * predates the admin patch. */
 function _aaUnavailable(payload, what) {
-  const message = _aaEsc((payload && payload.error) || 'unavailable');
-  const rebuild = payload && payload.needs_rebuild
-    ? `<div style="margin-top:8px;padding:8px;background:var(--input-bg);border-radius:6px;font-family:ui-monospace,monospace;font-size:11px">
-         cd /srv/sentry/repo/deploy/linux &amp;&amp; docker compose build hermes &amp;&amp; docker compose up -d hermes
-       </div>
-       <div style="margin-top:6px;font-size:11px;color:var(--muted)">
-         This Hermes image predates the agent admin surface. Retrying will not help — it needs a rebuild.
+  const updating = Boolean(payload && payload.needs_rebuild);
+  const message = _aaEsc(updating
+    ? 'Sentry is still enabling this feature. Try again shortly.'
+    : (payload && payload.error) || 'unavailable');
+  const rebuild = updating
+    ? `<div style="margin-top:6px;font-size:11px;color:var(--muted)">
+         Sentry’s automatic updater needs to finish enabling this feature. Try again shortly.
        </div>`
     : '';
   return `<div style="padding:12px;border:1px solid var(--border);border-radius:8px;background:var(--panel-bg)">
@@ -171,6 +172,7 @@ function _aaRenderProviders(payload) {
   }
   return providers.map(p => {
     const id = _aaEsc(p.id);
+    const name = _aaEsc(p.name || p.id);
     const creds = (p.credentials || []).map(c =>
       `<div style="font-size:11px;color:var(--muted)">· ${_aaEsc(c.label || c.id)} (${_aaEsc(c.auth_type || 'credential')})</div>`
     ).join('');
@@ -178,16 +180,17 @@ function _aaRenderProviders(payload) {
     if (p.authenticated) {
       action = `<button class="btn" onclick="agentAdminLogout('${id}')">Sign out</button>`;
     } else if (p.browser_login) {
-      action = `<button class="btn" onclick="agentAdminStartOAuth('${id}')">Connect…</button>`;
+      action = `<button class="btn" onclick="agentAdminStartOAuth('${id}')">Connect</button>`;
     } else {
-      // No dead button: a CLI-only provider says so, and says exactly what to run.
-      action = `<div style="font-size:11px;color:var(--muted)">Sign in on the server:
-        <code style="font-family:ui-monospace,monospace">${_aaEsc(p.cli_command || ('hermes auth add ' + p.id))}</code></div>`;
+      const reason = p.unavailable_reason
+        || 'This provider does not currently offer an in-app connection flow.';
+      action = `<div style="max-width:220px;font-size:11px;color:var(--muted);text-align:right">${_aaEsc(reason)}</div>`;
     }
     return `<div style="padding:12px;border:1px solid var(--border);border-radius:8px;margin-bottom:8px">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
         <div>
-          <div style="font-size:12px;font-weight:600">${id}</div>
+          <div style="font-size:12px;font-weight:600">${name}</div>
+          ${name !== id ? `<div style="font-size:10px;color:var(--muted)">${id}</div>` : ''}
           <div style="font-size:11px;color:${p.authenticated ? '#2a2' : 'var(--muted)'}">
             ${p.authenticated ? 'Connected' : 'Not connected'}
           </div>
@@ -200,14 +203,31 @@ function _aaRenderProviders(payload) {
 }
 
 async function agentAdminStartOAuth(provider) {
+  if (_agentAdminOAuthFlow && _agentAdminOAuthFlow.flow_id) {
+    await agentAdminCancelOAuth();
+  } else {
+    _aaClearOAuthPoll();
+  }
   const result = await _aaFetch('/api/agent/auth/oauth/start', {
     method: 'POST', body: JSON.stringify({ provider }),
   });
-  if (result.available !== true || !result.authorize_url) {
+  if (result.available !== true || !result.flow_id) {
     _aaToast(`Could not start sign-in: ${result.error || 'unknown error'}`);
     return;
   }
   _agentAdminOAuthFlow = result;
+  if (result.status === 'success') {
+    _aaToast(`${result.name || result.provider} connected.`);
+    _aaFinishOAuthUi();
+    await loadAgentAdmin();
+    return;
+  }
+  if (result.flow_kind === 'device') {
+    _aaRenderDeviceOAuth(result);
+    _aaScheduleOAuthPoll(result.poll_interval_seconds);
+    return;
+  }
+
   const box = document.getElementById('agentAdminOAuthBox');
   if (box) {
     box.style.display = '';
@@ -236,10 +256,113 @@ async function agentAdminStartOAuth(provider) {
   }
 }
 
-function agentAdminCancelOAuth() {
+function _aaClearOAuthPoll() {
+  if (_agentAdminOAuthPollTimer) {
+    clearTimeout(_agentAdminOAuthPollTimer);
+    _agentAdminOAuthPollTimer = null;
+  }
+}
+
+function _aaFinishOAuthUi() {
+  _aaClearOAuthPoll();
   _agentAdminOAuthFlow = null;
   const box = document.getElementById('agentAdminOAuthBox');
   if (box) { box.style.display = 'none'; box.innerHTML = ''; }
+}
+
+function _aaRenderDeviceOAuth(flow) {
+  const box = document.getElementById('agentAdminOAuthBox');
+  if (!box) return;
+  const ready = flow.status === 'awaiting_user' && flow.authorize_url;
+  const code = flow.user_code
+    ? `<div style="margin-top:10px;font-size:11px;color:var(--muted)">Authorization code</div>
+       <div style="display:flex;align-items:center;gap:8px;margin-top:3px">
+         <code style="font-size:16px;letter-spacing:.08em;padding:7px 10px;border-radius:6px;background:var(--input-bg)">${_aaEsc(flow.user_code)}</code>
+         <button class="btn" onclick="agentAdminCopyOAuthCode()">Copy</button>
+       </div>`
+    : '';
+  const action = ready
+    ? `<a href="${_aaEsc(flow.authorize_url)}" target="_blank" rel="noopener noreferrer" class="btn">Open sign-in page ↗</a>`
+    : `<span style="font-size:11px;color:var(--muted)">Preparing secure sign-in…</span>`;
+  box.style.display = '';
+  box.innerHTML = `
+    <div style="font-size:12px;font-weight:600">Connect ${_aaEsc(flow.provider)}</div>
+    <div style="margin-top:6px;font-size:12px;color:var(--muted)">
+      ${_aaEsc(flow.instructions || 'Preparing a secure authorization code…')}
+    </div>
+    ${code}
+    <div style="margin-top:10px;display:flex;gap:8px;align-items:center">
+      ${action}
+      <button class="btn" onclick="agentAdminCancelOAuth()">Cancel</button>
+    </div>`;
+}
+
+async function agentAdminCopyOAuthCode() {
+  const code = String((_agentAdminOAuthFlow && _agentAdminOAuthFlow.user_code) || '');
+  if (!code) return;
+  try {
+    await navigator.clipboard.writeText(code);
+    _aaToast('Code copied');
+  } catch (_) {
+    _aaToast('Could not copy automatically. Select the code and copy it manually.');
+  }
+}
+
+function _aaRenderOAuthTerminal(ok, message) {
+  const box = document.getElementById('agentAdminOAuthBox');
+  if (!box) return;
+  box.style.display = '';
+  box.innerHTML = `<div style="font-size:12px;font-weight:600;color:${ok ? '#2a2' : '#e05'}">${ok ? 'Connected' : 'Sign-in did not complete'}</div>
+    <div style="margin-top:6px;font-size:12px;color:var(--muted)">${_aaEsc(message)}</div>
+    ${ok ? '' : '<button class="btn" style="margin-top:8px" onclick="_aaFinishOAuthUi()">Close</button>'}`;
+}
+
+function _aaScheduleOAuthPoll(seconds) {
+  _aaClearOAuthPoll();
+  const delay = Math.max(1, Number(seconds || 3)) * 1000;
+  _agentAdminOAuthPollTimer = setTimeout(agentAdminPollOAuth, delay);
+}
+
+async function agentAdminPollOAuth() {
+  const flow = _agentAdminOAuthFlow;
+  if (!flow || flow.flow_kind !== 'device') return;
+  const result = await _aaFetch(`/api/agent/auth/oauth/${encodeURIComponent(flow.flow_id)}`);
+  if (!_agentAdminOAuthFlow || _agentAdminOAuthFlow.flow_id !== flow.flow_id) return;
+  if (result.available !== true) {
+    _agentAdminOAuthFlow = null;
+    _aaClearOAuthPoll();
+    _aaRenderOAuthTerminal(false, result.error || 'Could not read sign-in status.');
+    return;
+  }
+  _agentAdminOAuthFlow = Object.assign({}, flow, result);
+  if (result.status === 'success') {
+    _aaClearOAuthPoll();
+    _aaRenderOAuthTerminal(true, 'Credentials were stored securely by Sentry.');
+    _aaToast(`${result.provider || 'Provider'} connected.`);
+    _agentAdminOAuthFlow = null;
+    await loadAgentAdmin();
+    setTimeout(_aaFinishOAuthUi, 1200);
+    return;
+  }
+  if (result.status === 'error' || result.status === 'cancelled') {
+    _agentAdminOAuthFlow = null;
+    _aaClearOAuthPoll();
+    _aaRenderOAuthTerminal(false, result.error || 'The sign-in was cancelled.');
+    return;
+  }
+  _aaRenderDeviceOAuth(_agentAdminOAuthFlow);
+  _aaScheduleOAuthPoll(result.poll_interval_seconds);
+}
+
+async function agentAdminCancelOAuth() {
+  const flow = _agentAdminOAuthFlow;
+  _aaClearOAuthPoll();
+  if (flow && flow.flow_id) {
+    await _aaFetch(`/api/agent/auth/oauth/${encodeURIComponent(flow.flow_id)}`, {
+      method: 'DELETE', body: '{}',
+    });
+  }
+  _aaFinishOAuthUi();
 }
 
 async function agentAdminCompleteOAuth() {
@@ -255,7 +378,8 @@ async function agentAdminCompleteOAuth() {
     _aaToast(`Sign-in failed: ${result.error || 'unknown error'}`);
     return;
   }
-  agentAdminCancelOAuth();
+  _aaFinishOAuthUi();
+  _aaToast(`${result.provider || 'Provider'} connected.`);
   await loadAgentAdmin();
 }
 

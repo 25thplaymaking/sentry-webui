@@ -28,14 +28,19 @@ _SUBSYSTEMS = ("memory", "skills")
 def _unavailable(message: str, status: int) -> dict:
     """Envelope for a failed admin-surface call.
 
-    ``needs_rebuild`` lets the UI say the useful thing ("rebuild the Hermes
-    image") instead of a generic retry prompt.
+    ``needs_rebuild`` lets the UI distinguish an automatic rollout still in
+    progress from a transient request failure without exposing operator work.
     """
+    needs_rebuild = status == 501
     return {
         "available": False,
-        "error": message,
+        "error": (
+            "Sentry is still enabling this feature. Try again shortly."
+            if needs_rebuild
+            else message
+        ),
         "status": status,
-        "needs_rebuild": status == 501,
+        "needs_rebuild": needs_rebuild,
         "items": [],
         "providers": [],
     }
@@ -144,8 +149,8 @@ def auth_providers(handler) -> dict:
     """Credential providers, and which this profile is signed into.
 
     Only providers with ``oauth_over_http`` can be logged in from the browser.
-    The rest are CLI-only, and are reported as such rather than shown with a
-    button that leads nowhere.
+    Unsupported or retired flows carry a user-facing reason; the WebUI never
+    turns an implementation gap into instructions to operate the server.
     """
     token = _token_or_none(handler)
     if not token:
@@ -163,9 +168,11 @@ def auth_providers(handler) -> dict:
         providers.append(
             {
                 "id": provider_id,
+                "name": entry.get("name") or provider_id,
                 "authenticated": bool(entry.get("authenticated")),
                 "oauth_capable": bool(entry.get("oauth_capable")),
                 "browser_login": bool(entry.get("oauth_over_http")),
+                "unavailable_reason": entry.get("oauth_unavailable_reason"),
                 "credentials": [
                     {
                         "id": cred.get("id"),
@@ -176,13 +183,6 @@ def auth_providers(handler) -> dict:
                     for cred in entry.get("credentials") or []
                     if isinstance(cred, dict)
                 ],
-                "cli_command": (
-                    None
-                    if entry.get("oauth_over_http")
-                    else f"hermes auth add {provider_id} --type oauth"
-                    if entry.get("oauth_capable")
-                    else None
-                ),
             }
         )
     providers.sort(key=lambda p: (not p["browser_login"], not p["authenticated"], p["id"] or ""))
@@ -207,11 +207,60 @@ def auth_oauth_start(handler, body: dict) -> dict:
     return {
         "available": True,
         "flow_id": data.get("flow_id"),
+        "flow_kind": data.get("flow_kind", "paste"),
         "provider": data.get("provider", provider),
+        "status": data.get("status", "awaiting_user"),
         "authorize_url": data.get("authorize_url"),
+        "user_code": data.get("user_code"),
         "expires_in": data.get("expires_in"),
+        "poll_interval_seconds": data.get("poll_interval_seconds", 3),
         "instructions": data.get("instructions"),
+        "credential": data.get("credential") or {},
     }
+
+
+def auth_oauth_status(handler, flow_id: str) -> dict:
+    """Browser-safe progress for an in-flight provider login."""
+    token = _token_or_none(handler)
+    if not token:
+        return _unavailable("not signed in to the Sentry Gateway", 401)
+    flow_id = str(flow_id or "").strip()
+    if not flow_id:
+        return _unavailable("flow_id is required", 400)
+
+    data, err = _call("GET", f"/api/agent/auth/oauth/{quote(flow_id, safe='')}", token)
+    if err:
+        return err
+    data = data or {}
+    return {
+        "available": True,
+        "flow_id": data.get("flow_id", flow_id),
+        "flow_kind": data.get("flow_kind", "device"),
+        "provider": data.get("provider"),
+        "status": data.get("status"),
+        "authorize_url": data.get("authorize_url"),
+        "user_code": data.get("user_code"),
+        "poll_interval_seconds": data.get("poll_interval_seconds", 3),
+        "instructions": data.get("instructions"),
+        "error": data.get("error"),
+        # Identity only; Hermes never includes access/refresh tokens here.
+        "credential": data.get("credential") or {},
+    }
+
+
+def auth_oauth_cancel(handler, flow_id: str) -> dict:
+    """Cancel an in-flight provider login and its server-side poller."""
+    token = _token_or_none(handler)
+    if not token:
+        return _unavailable("not signed in to the Sentry Gateway", 401)
+    flow_id = str(flow_id or "").strip()
+    if not flow_id:
+        return _unavailable("flow_id is required", 400)
+
+    data, err = _call("DELETE", f"/api/agent/auth/oauth/{quote(flow_id, safe='')}", token)
+    if err:
+        return err
+    return {"available": True, "ok": True, **(data or {})}
 
 
 def auth_oauth_complete(handler, body: dict) -> dict:

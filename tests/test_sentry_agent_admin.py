@@ -17,6 +17,8 @@ These tests pin the properties that keep the proxy honest:
   4. Access tokens never come back to the browser.
 """
 
+from pathlib import Path
+
 import pytest
 
 from api import sentry_agent_admin as admin
@@ -134,19 +136,31 @@ class TestPendingReview:
 
 
 class TestCredentials:
-    def test_cli_only_providers_get_no_browser_button(self, monkeypatch, as_signed_in):
+    def test_old_runtime_error_is_turned_into_an_automatic_update_message(self):
+        out = admin._unavailable("Rebuild the Hermes image on the server.", 501)
+        assert out["needs_rebuild"] is True
+        assert out["error"] == "Sentry is still enabling this feature. Try again shortly."
+        assert "server" not in out["error"].lower()
+
+    def test_unavailable_providers_never_tell_the_user_to_operate_the_server(
+        self, monkeypatch, as_signed_in
+    ):
         stub_call(monkeypatch, result={"data": [
             {"id": "anthropic", "authenticated": False,
-             "oauth_capable": True, "oauth_over_http": True, "credentials": []},
-            {"id": "openai-codex", "authenticated": False,
-             "oauth_capable": True, "oauth_over_http": False, "credentials": []},
+             "name": "Anthropic", "oauth_capable": True,
+             "oauth_over_http": True, "credentials": []},
+            {"id": "qwen-oauth", "authenticated": False,
+             "name": "Qwen OAuth", "oauth_capable": True,
+             "oauth_over_http": False,
+             "oauth_unavailable_reason": "Qwen OAuth is no longer offered.",
+             "credentials": []},
         ]})
         providers = {p["id"]: p for p in admin.auth_providers(FakeHandler())["providers"]}
         assert providers["anthropic"]["browser_login"] is True
-        assert providers["anthropic"]["cli_command"] is None
-        assert providers["openai-codex"]["browser_login"] is False
-        # The CLI fallback is spelled out rather than leaving a dead button.
-        assert "hermes auth add openai-codex" in providers["openai-codex"]["cli_command"]
+        assert providers["qwen-oauth"]["browser_login"] is False
+        assert providers["qwen-oauth"]["unavailable_reason"].startswith("Qwen OAuth")
+        assert "cli_command" not in providers["qwen-oauth"]
+        assert "hermes auth" not in repr(providers)
 
     def test_browser_capable_providers_sort_first(self, monkeypatch, as_signed_in):
         stub_call(monkeypatch, result={"data": [
@@ -212,6 +226,41 @@ class TestOAuthCodeIntegrity:
         out = admin.auth_oauth_start(FakeHandler(), {"provider": "anthropic"})
         assert out["authorize_url"].startswith("https://claude.ai/oauth/authorize")
         assert out["flow_id"] == "f1"
+
+    def test_device_start_returns_code_and_poll_contract(self, monkeypatch, as_signed_in):
+        stub_call(monkeypatch, result={
+            "flow_id": "f2", "flow_kind": "device", "provider": "openai-codex",
+            "status": "awaiting_user",
+            "authorize_url": "https://auth.openai.com/codex/device",
+            "user_code": "ABCD-EFGH", "poll_interval_seconds": 3,
+        })
+        out = admin.auth_oauth_start(FakeHandler(), {"provider": "openai-codex"})
+        assert out["flow_kind"] == "device"
+        assert out["user_code"] == "ABCD-EFGH"
+        assert out["status"] == "awaiting_user"
+
+    def test_status_and_cancel_use_fixed_flow_routes(self, monkeypatch, as_signed_in):
+        calls = stub_call(monkeypatch, result={
+            "flow_id": "f1", "flow_kind": "device", "status": "awaiting_user",
+        })
+        status = admin.auth_oauth_status(FakeHandler(), "f1")
+        cancelled = admin.auth_oauth_cancel(FakeHandler(), "f1")
+        assert status["status"] == "awaiting_user"
+        assert cancelled["ok"] is True
+        assert calls[0][:2] == ("GET", "/api/agent/auth/oauth/f1")
+        assert calls[1][:2] == ("DELETE", "/api/agent/auth/oauth/f1")
+
+
+def test_agent_admin_ui_has_no_server_command_fallback():
+    source = (Path(admin.__file__).parent.parent / "static" / "agent_admin.js").read_text(
+        encoding="utf-8"
+    )
+    assert "Sign in on the server" not in source
+    assert "hermes auth add" not in source
+    assert "docker compose" not in source
+    assert "agentAdminPollOAuth" in source
+    assert "agentAdminCopyOAuthCode" in source
+    assert "Open sign-in page" in source
 
 
 class TestLogout:
