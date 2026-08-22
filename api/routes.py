@@ -15754,9 +15754,9 @@ def handle_post(handler, parsed) -> bool:
                 personality=session.personality,
                 enabled_toolsets=getattr(session, "enabled_toolsets", None),
                 experience=getattr(session, "experience", "work"),
-                native_workspace_id=getattr(session, "native_workspace_id", None),
                 context_length=getattr(session, "context_length", None),
                 threshold_tokens=getattr(session, "threshold_tokens", None),
+                native_workspace_id=getattr(session, "native_workspace_id", None),
                 truncation_watermark=getattr(session, "truncation_watermark", None),
                 truncation_boundary=getattr(session, "truncation_boundary", None),
                 # context_messages is the authoritative model-facing prefix — must be
@@ -16199,9 +16199,12 @@ def handle_post(handler, parsed) -> bool:
         old_ws = getattr(s, "workspace", "")
         old_model = getattr(s, "model", None)
         old_provider = getattr(s, "model_provider", None)
+        existing_native_workspace_id = getattr(s, "native_workspace_id", None)
+        if not isinstance(existing_native_workspace_id, str):
+            existing_native_workspace_id = None
         try:
             native_workspace_id = _validate_native_workspace_id(
-                body.get("native_workspace_id", getattr(s, "native_workspace_id", None))
+                body.get("native_workspace_id", existing_native_workspace_id)
             )
         except ValueError as e:
             return bad(handler, str(e), status=400)

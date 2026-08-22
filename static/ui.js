@@ -4316,6 +4316,17 @@ function renderModelDropdown(){
   const _groupMeta=new Map();
   const _groupOrder=[];
   const _badgeMap=window._configuredModelBadges||{};
+  // Keep this helper local: several picker contract tests intentionally eval
+  // renderModelDropdown in isolation, just as extension hosts can.
+  const _nativeRuntimeFor=(opt)=>{
+    if(!opt) return '';
+    const direct=String((opt.dataset&&opt.dataset.nativeRuntime)||'').trim();
+    if(direct) return direct;
+    const group=opt.parentElement;
+    const grouped=group&&group.dataset?String(group.dataset.nativeRuntime||'').trim():'';
+    if(grouped) return grouped;
+    return String(opt.value||'').startsWith('chatgpt-plan/')?'codex':'';
+  };
   const _ensureGroupMeta=(groupKey,groupLabel,providerId,optgroup)=>{
     if(!_groupMeta.has(groupKey)){
       _groupMeta.set(groupKey,{
@@ -4354,7 +4365,7 @@ function renderModelDropdown(){
         const displayName=rawValue.startsWith('@custom:')
           ? getModelLabel(rawValue)
           : (opt.textContent||getModelLabel(rawValue));
-        const entry={value:opt.value,name:esc(displayName),id:esc(opt.value),group:child.label||'',groupKey,providerId,modelsEndpointError,badge:_getConfiguredModelBadge(opt.value,_badgeMap,providerId),nativeRuntime:_modelOptionNativeRuntime(opt),hiddenByDefault:false};
+        const entry={value:opt.value,name:esc(displayName),id:esc(opt.value),group:child.label||'',groupKey,providerId,modelsEndpointError,badge:_getConfiguredModelBadge(opt.value,_badgeMap,providerId),nativeRuntime:_nativeRuntimeFor(opt),hiddenByDefault:false};
         _modelData.push(entry);
         groupMeta.modelCount++;
       }
@@ -4389,7 +4400,7 @@ function renderModelDropdown(){
       const displayName=rawValue.startsWith('@custom:')
         ? getModelLabel(rawValue)
         : (child.textContent||getModelLabel(rawValue));
-      _modelData.push({value:child.value,name:esc(displayName),id:esc(child.value),group:'',groupKey,providerId:'',badge:_getConfiguredModelBadge(child.value,_badgeMap),nativeRuntime:_modelOptionNativeRuntime(child),hiddenByDefault:false});
+      _modelData.push({value:child.value,name:esc(displayName),id:esc(child.value),group:'',groupKey,providerId:'',badge:_getConfiguredModelBadge(child.value,_badgeMap),nativeRuntime:_nativeRuntimeFor(child),hiddenByDefault:false});
       _groupMeta.get(groupKey).modelCount++;
     }
   }

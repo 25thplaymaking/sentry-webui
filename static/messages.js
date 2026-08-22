@@ -8733,6 +8733,51 @@ function _clarifySetControlsDisabled(disabled, loading=false) {
   }
 }
 
+function _renderNativeClarifyQuestions(choicesEl, nativeQuestions, pending) {
+  if (!choicesEl || !nativeQuestions.length) return false;
+  nativeQuestions.forEach((item,index)=>{
+    if(!item||!item.id) return;
+    const row=document.createElement('label');
+    row.className='clarify-native-question';
+    const header=document.createElement('span');
+    header.className='clarify-native-header';
+    header.textContent=String(item.header||`Question ${index+1}`);
+    const prompt=document.createElement('span');
+    prompt.className='clarify-native-prompt';
+    prompt.textContent=String(item.question||'');
+    const answer=document.createElement('input');
+    answer.className='clarify-input clarify-native-answer';
+    answer.type=item.isSecret?'password':'text';
+    answer.autocomplete=item.isSecret?'new-password':'off';
+    answer.dataset.questionId=String(item.id);
+    answer.dataset.valueType=String(item.value_type||'string');
+    answer.dataset.required=item.required===false?'false':'true';
+    answer.placeholder=item.required===false?'Optional':'Your answer';
+    const options=Array.isArray(item.options)?item.options:[];
+    if(options.length){
+      const listId=`clarify-options-${String(pending.clarify_id||'native').replace(/[^a-zA-Z0-9_-]/g,'')}-${index}`;
+      const datalist=document.createElement('datalist');
+      datalist.id=listId;
+      options.forEach(option=>{
+        const value=String((option&&option.label)||option||'').trim();
+        if(!value) return;
+        const optionEl=document.createElement('option');
+        optionEl.value=value;
+        if(option&&option.description) optionEl.label=String(option.description);
+        datalist.appendChild(optionEl);
+      });
+      answer.setAttribute('list',listId);
+      row.appendChild(datalist);
+    }
+    answer.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();respondClarify();}};
+    row.appendChild(header);
+    row.appendChild(prompt);
+    row.appendChild(answer);
+    choicesEl.appendChild(row);
+  });
+  return true;
+}
+
 function showClarifyCard(pending) {
   const sid = _rememberClarifyPending(pending);
   if (!_clarifyPromptBelongsToActiveSession(sid)) return;
@@ -8771,47 +8816,8 @@ function showClarifyCard(pending) {
   if (choicesEl) {
     choicesEl.innerHTML = '';
     choicesEl.style.display = (nativeQuestions.length||choices.length) ? '' : 'none';
-    if(nativeQuestions.length){
-      nativeQuestions.forEach((item,index)=>{
-        if(!item||!item.id) return;
-        const row=document.createElement('label');
-        row.className='clarify-native-question';
-        const header=document.createElement('span');
-        header.className='clarify-native-header';
-        header.textContent=String(item.header||`Question ${index+1}`);
-        const prompt=document.createElement('span');
-        prompt.className='clarify-native-prompt';
-        prompt.textContent=String(item.question||'');
-        const answer=document.createElement('input');
-        answer.className='clarify-input clarify-native-answer';
-        answer.type=item.isSecret?'password':'text';
-        answer.autocomplete=item.isSecret?'new-password':'off';
-        answer.dataset.questionId=String(item.id);
-        answer.dataset.valueType=String(item.value_type||'string');
-        answer.dataset.required=item.required===false?'false':'true';
-        answer.placeholder=item.required===false?'Optional':'Your answer';
-        const options=Array.isArray(item.options)?item.options:[];
-        if(options.length){
-          const listId=`clarify-options-${String(pending.clarify_id||'native').replace(/[^a-zA-Z0-9_-]/g,'')}-${index}`;
-          const datalist=document.createElement('datalist');
-          datalist.id=listId;
-          options.forEach(option=>{
-            const value=String((option&&option.label)||option||'').trim();
-            if(!value) return;
-            const optionEl=document.createElement('option');
-            optionEl.value=value;
-            if(option&&option.description) optionEl.label=String(option.description);
-            datalist.appendChild(optionEl);
-          });
-          answer.setAttribute('list',listId);
-          row.appendChild(datalist);
-        }
-        answer.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();respondClarify();}};
-        row.appendChild(header);
-        row.appendChild(prompt);
-        row.appendChild(answer);
-        choicesEl.appendChild(row);
-      });
+    if(_renderNativeClarifyQuestions(choicesEl,nativeQuestions,pending)){
+      // Native App Server questions can contain several typed answers.
     }else if (choices.length) {
       choices.forEach((choice, idx) => {
         const btn = document.createElement('button');
