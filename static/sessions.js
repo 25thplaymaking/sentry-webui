@@ -1419,12 +1419,6 @@ async function newSession(flash, options={}){
       workspace:inheritWs,
       profile:S.activeProfile||'default',
     };
-    const requestedExperience=(options&&Object.prototype.hasOwnProperty.call(options,'experience'))
-      ? options.experience
-      : ((S.session&&S.session.experience)||S._pendingExperience||'chat');
-    reqBody.experience=(typeof _normalizeExperience==='function')
-      ? _normalizeExperience(requestedExperience)
-      : (String(requestedExperience||'').toLowerCase()==='chat'?'chat':'work');
     if(S.session&&S.session.session_id){
       reqBody.prev_session_id=S.session.session_id;
       if(sessionWs) reqBody.workspace_inherited_from_prev_session=true;
@@ -1507,6 +1501,12 @@ async function newSession(flash, options={}){
         ||((_bareModel&&!_familyMismatch&&!_fallbackIsNamedCustom)?(_fallbackProvider||null):null)
         ||null;
     }
+    const requestedExperience=(options&&Object.prototype.hasOwnProperty.call(options,'experience'))
+      ? options.experience
+      : ((S.session&&S.session.experience)||S._pendingExperience||'chat');
+    reqBody.experience=(typeof _normalizeExperience==='function')
+      ? _normalizeExperience(requestedExperience)
+      : (String(requestedExperience||'').toLowerCase()==='chat'?'chat':'work');
     const data=await api('/api/session/new',{method:'POST',body:JSON.stringify(reqBody)});
     if(consumedExplicitModelOverride&&typeof _clearEmptyComposerModelOverride==='function'){
       _clearEmptyComposerModelOverride();
@@ -1995,12 +1995,12 @@ async function loadSession(sid){
     return loadSession(continuationSid,{...opts,skipLineageResolve:true,skipContinuationResolve:true,force:true,_preloadNotified:true});
   }
   S.session=data.session;
-  S._pendingExperience=(data.session&&data.session.experience)||'work';
   if(typeof _adoptRegenerationRevision==='function') _adoptRegenerationRevision(data.session);
   if(typeof _clearEmptyComposerModelOverride==='function') _clearEmptyComposerModelOverride();
   // Loading a real existing session abandons any pre-session toolset override
   // staged on the empty composer before any deferred refresh work runs.
   S._pendingSessionToolsets=null;
+  S._pendingExperience=(data.session&&data.session.experience)||'work';
   if(typeof populateModelDropdown==='function'){
     const modelRefreshSid=sid;
     const isActiveModelRefreshSession=()=>!!(S.session&&S.session.session_id===modelRefreshSid);
