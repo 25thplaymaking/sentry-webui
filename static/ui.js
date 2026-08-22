@@ -4996,8 +4996,10 @@ function renderModelDropdown(){
     const trigger=$(opts.triggerId||(sel.id==='settingsModel'?'settingsModelChip':'composerModelChip'));
     if(trigger&&typeof trigger.focus==='function') trigger.focus({preventScroll:true});
   };
-  dd.appendChild(_scopeNote);
-  dd.appendChild(_searchRow);
+  // Keep the note and search mounted inside their sticky wrapper. Appending the
+  // children directly here would move them out of `_pickerHeader`, leaving the
+  // wrapper empty when `_filterModels` clears and rebuilds the dropdown.
+  dd.appendChild(_pickerHeader);
   if(!window._modelCatalogRestricted){
     dd.appendChild(_custSep);
     dd.appendChild(_custRow);

@@ -21,6 +21,8 @@ def test_composer_model_dropdown_has_scope_advisory():
     assert "_pickerHeader.appendChild(_scopeNote);" in ui
     assert "_pickerHeader.appendChild(_searchRow);" in ui
     assert "dd.appendChild(_pickerHeader);" in ui
+    assert "dd.appendChild(_scopeNote);" not in ui
+    assert "dd.appendChild(_searchRow);" not in ui
     assert ".model-scope-note" in style
     assert ".model-picker-header{position:sticky" in style
 
