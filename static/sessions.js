@@ -1630,6 +1630,50 @@ function _clearStuckSessionOnBoot(sid, currentSid){
   }
 }
 
+/**
+ * Return the active pane to a usable fresh-composer state when its server-side
+ * session disappeared.  Keep the draft text and pending attachments intact so
+ * the user can send them into the next session instead of losing work.
+ */
+function _resetUnavailableActiveSession(sid){
+  const activeSid=S.session&&S.session.session_id;
+  if(activeSid&&activeSid!==sid) return false;
+  if(sid&&INFLIGHT&&INFLIGHT[sid]){
+    delete INFLIGHT[sid];
+    if(typeof clearInflightState==='function') clearInflightState(sid);
+  }
+  if(typeof clearOptimisticSessionStreaming==='function') clearOptimisticSessionStreaming(sid);
+  if(typeof window._clearPendingSelections==='function') window._clearPendingSelections();
+  if(typeof clearLiveToolCards==='function') clearLiveToolCards();
+  if(typeof removeThinking==='function') removeThinking();
+  S.session=null;
+  S.messages=[];
+  S.entries=[];
+  S.toolCalls=[];
+  S.activeStreamId=null;
+  S.busy=false;
+  S._pendingSessionToolsets=null;
+  _messagesTruncated=false;
+  _oldestIdx=0;
+  _loadingOlder=false;
+  if(typeof _hydrateTodosFromSession==='function') _hydrateTodosFromSession(null);
+  if(typeof updateSendBtn==='function') updateSendBtn();
+  if(typeof setComposerStatus==='function') setComposerStatus('');
+  if(typeof updateQueueBadge==='function') updateQueueBadge();
+  const inner=$('msgInner');
+  if(inner) inner.innerHTML='';
+  const empty=$('emptyState');
+  if(empty) empty.style.display='';
+  const title=$('topbarTitle');
+  if(title) title.textContent=assistantDisplayName();
+  const meta=$('topbarMeta');
+  if(meta) meta.textContent='Start a new conversation';
+  if(typeof syncTopbar==='function') syncTopbar();
+  if(typeof syncWorkspacePanelState==='function') syncWorkspacePanelState();
+  if(typeof renderSessionList==='function') void renderSessionList();
+  return true;
+}
+
 // #2971 (Greptile P1 r3377162160): loadSession() tears down the live
 // per-session SSE at the top via stopSessionStream() (line ~754), but only the
 // success path re-arms it via startSessionStream() (line ~875). Every
@@ -1892,7 +1936,6 @@ async function loadSession(sid){
         e=switchErr;
       }
     }
-    const _msgInner = $('msgInner');
     // Stale-load guard (Codex): a newer loadSession() may have started while this
     // request was awaiting (e.g. the user clicked a healthy session during a
     // boot-time restore). currentSid was snapshotted before the await, so without
@@ -1904,39 +1947,46 @@ async function loadSession(sid){
       _rearmActiveSessionStream();
       return;
     }
-    if(_msgInner){
-      if(e.status===404){
-        _msgInner.innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:14px;padding:40px;text-align:center;">Session not available in web UI.</div>';
-        // Self-heal (clear saved id + strip /session/<id> URL) only when the
-        // 404'd id is the one we are activating: a boot-time restore
-        // (!currentSid, #2798) or a mid-session reload of the *current* session
-        // whose sidecar was deleted server-side (#2782). A click into a
-        // *different* dead session (currentSid && currentSid!==sid) must not run
-        // it: localStorage and the URL still point at the live session (both are
-        // only updated on a successful load), so wiping them would log the user
-        // out of a healthy session. The URL strip is needed in the self-heal
-        // case because _sessionIdFromLocation() re-injects the id on reload.
-        // Only the rethrow stays gated on !currentSid: boot rethrows to fall
-        // through to empty-state; mid-session there is no boot path to reach.
-        if(!currentSid || currentSid===sid){
-          try{ localStorage.removeItem('hermes-webui-session'); }catch(_){ }
-          try{ history.replaceState(null,'',_appRootPath()); }catch(_){ }
-          if (_isCurrentLoad()) _loadingSessionId = null;
-          if(!currentSid){
-            throw e;
-          }
-        }
-      } else {
-        // Non-404, non-401 failure (400, 403, 500, network): 401 is handled
-        // via the if(!data) guard below since api() returns undefined on 401
-        // rather than throwing. Clear the stuck session ID only during boot
-        // (!currentSid) so the next boot doesn't retry the same dead session.
-        // When currentSid is set, a 500/network error may be transient — the
-        // session might still exist on the server (#4028 follow-up).
-        _clearStuckSessionOnBoot(sid, currentSid);
-        _msgInner.innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:14px;padding:40px;text-align:center;">Failed to load session. Try refreshing or switching sessions.</div>';
-        if(typeof showToast==='function') showToast('Failed to load session',3000,'error');
+    if(e.status===404){
+      // The requested row is gone. Boot still rethrows so the existing boot
+      // fallback can finish initialization, but an already-running app must
+      // recover immediately instead of stranding on an unavailable-session
+      // pane until the next full refresh.
+      if(!currentSid || currentSid===sid){
+        try{ localStorage.removeItem('hermes-webui-session'); }catch(_){ }
+        try{ history.replaceState(null,'',_appRootPath()); }catch(_){ }
+        if (_isCurrentLoad()) _loadingSessionId = null;
+        _clearSameSessionForceReloadHint(sid);
+        if(!currentSid) throw e;
+        _resetUnavailableActiveSession(sid);
+        if(typeof showToast==='function') showToast('That session is no longer available. Start a new conversation.',3500);
+        return;
       }
+      // A failed switch has already cleared the old transcript to show its
+      // loading placeholder. Reload the still-current healthy session so the
+      // user lands back where they were, preserving its saved composer draft.
+      if (_isCurrentLoad()) _loadingSessionId = null;
+      _clearSameSessionForceReloadHint(sid);
+      if(typeof showToast==='function') showToast('That session is no longer available.',3000);
+      return loadSession(currentSid,{
+        force:true,
+        preserveActiveInput:true,
+        skipLineageResolve:true,
+        skipExtHooks:true,
+        _preloadNotified:true,
+      });
+    }
+    const _msgInner = $('msgInner');
+    if(_msgInner){
+      // Non-404, non-401 failure (400, 403, 500, network): 401 is handled
+      // via the if(!data) guard below since api() returns undefined on 401
+      // rather than throwing. Clear the stuck session ID only during boot
+      // (!currentSid) so the next boot doesn't retry the same dead session.
+      // When currentSid is set, a 500/network error may be transient — the
+      // session might still exist on the server (#4028 follow-up).
+      _clearStuckSessionOnBoot(sid, currentSid);
+      _msgInner.innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:14px;padding:40px;text-align:center;">Failed to load session. Try refreshing or switching sessions.</div>';
+      if(typeof showToast==='function') showToast('Failed to load session',3000,'error');
     }
     _clearSameSessionForceReloadHint(sid);
     // Capture whether this failure self-healed away the current session (a

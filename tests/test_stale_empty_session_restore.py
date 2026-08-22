@@ -10,9 +10,11 @@ These tests lock in:
   1. ``api()`` attaches HTTP context (``.status``, ``.statusText``, ``.body``)
      to thrown errors so callers can branch on status without re-parsing text.
   2. ``loadSession()`` clears the stale ``hermes-webui-session`` key on a 404
-     and strips the ``/session/<id>`` URL, then rethrows only at boot time so
-     boot can fall through to the empty state (#2798, #2782).
-  3. The server 404s a deleted *WebUI* session on ``GET /api/session`` instead
+     and strips the ``/session/<id>`` URL, then recovers immediately to a fresh
+     composer when the active session vanished (#2798, #2782).
+  3. Clicking a different dead row restores the still-current conversation
+     instead of replacing it with a permanent error pane.
+  4. The server 404s a deleted *WebUI* session on ``GET /api/session`` instead
      of synthesising a read-only CLI stub, so ``GET`` and the ``POST`` write
      paths agree on whether a session exists and the client can self-heal
      (#2782). A genuine CLI-origin session still returns 200 after its sidecar
@@ -23,13 +25,19 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 from urllib.parse import urlparse
+import json
 import re
+import shutil
+import subprocess
+
+import pytest
 
 
 REPO = Path(__file__).parent.parent
 WORKSPACE_JS = (REPO / "static" / "workspace.js").read_text(encoding="utf-8")
 SESSIONS_JS = (REPO / "static" / "sessions.js").read_text(encoding="utf-8")
 MESSAGES_JS = (REPO / "static" / "messages.js").read_text(encoding="utf-8")
+NODE = shutil.which("node")
 
 
 def _api_body() -> str:
@@ -43,13 +51,8 @@ def _load_session_error_block() -> str:
     assert start > 0, "loadSession metadata request not found"
     catch_idx = SESSIONS_JS.find("} catch(e) {", start)
     assert catch_idx > start, "loadSession metadata catch block not found"
-    # The catch opens with a stale-load guard that itself contains an early
-    # `return;` (#3993 Codex race fix). Skip past that guard so we extract the
-    # 404 / non-404 self-heal body, not just the guard.
-    body_start = SESSIONS_JS.find("if(_msgInner){", catch_idx)
-    assert body_start > catch_idx, "loadSession catch body not found"
-    end = SESSIONS_JS.find("return;", body_start)
-    assert end > body_start, "loadSession metadata catch return not found"
+    end = SESSIONS_JS.find("\n  // Guard: api()", catch_idx)
+    assert end > catch_idx, "loadSession metadata catch terminator not found"
     return SESSIONS_JS[catch_idx:end]
 
 
@@ -58,8 +61,7 @@ def _load_session_404_block() -> str:
     block = _load_session_error_block()
     start = block.find("if(e.status===404){")
     assert start >= 0, "loadSession 404 arm not found"
-    # The 404 arm is closed by the `} else {` of the outer status check.
-    end = block.find("} else {", start)
+    end = block.find("const _msgInner", start)
     assert end > start, "loadSession 404 arm terminator not found"
     return block[start:end]
 
@@ -136,6 +138,172 @@ def test_load_session_404_self_heal_gated_to_active_or_boot():
     assert re.search(r"throw\s+e", arm[rethrow_gate_idx:]), (
         "the !currentSid gate must still contain the boot-time rethrow"
     )
+
+
+def test_active_session_404_recovers_to_fresh_composer_immediately():
+    """A current session removed server-side must not leave the running app on
+    the old permanent "Session not available" pane until a manual refresh."""
+    arm = _load_session_404_block()
+    active_gate = "if(!currentSid || currentSid===sid)"
+    gate_idx = arm.find(active_gate)
+    reset_idx = arm.find("_resetUnavailableActiveSession(sid)")
+    assert reset_idx > gate_idx, "active-session 404 must reset to a usable composer"
+    assert re.search(r"_resetUnavailableActiveSession\(sid\);\s*.*?return\s*;", arm[reset_idx:], re.DOTALL), (
+        "active-session recovery must return before the generic failed-load pane"
+    )
+    helper_start = SESSIONS_JS.find("function _resetUnavailableActiveSession(sid)")
+    helper_end = SESSIONS_JS.find("\n}\n", helper_start)
+    assert helper_start > 0 and helper_end > helper_start, "recovery helper must exist"
+    helper = SESSIONS_JS[helper_start:helper_end]
+    for required in (
+        "S.session=null",
+        "S.messages=[]",
+        "S.entries=[]",
+        "S.toolCalls=[]",
+        "S.activeStreamId=null",
+        "S.busy=false",
+        "inner.innerHTML=''",
+        "empty.style.display=''",
+        "renderSessionList()",
+    ):
+        assert required in helper, f"fresh-composer recovery must include {required}"
+    assert "S.pendingFiles=[]" not in helper, "recovery must preserve pending attachments"
+
+
+def test_different_dead_session_404_restores_current_conversation():
+    """A stale sidebar row must bounce back to the healthy session that was
+    already open, without clearing its saved URL/localStorage identity."""
+    arm = _load_session_404_block()
+    restore = "return loadSession(currentSid,{"
+    assert restore in arm, "failed sidebar switch must reload the current session"
+    restore_block = arm[arm.find(restore):]
+    assert "force:true" in restore_block
+    assert "preserveActiveInput:true" in restore_block
+    assert "skipExtHooks:true" in restore_block
+    assert "Session not available in web UI." not in arm, (
+        "a 404 must no longer replace the transcript with a permanent error pane"
+    )
+
+
+@pytest.mark.skipif(NODE is None, reason="node is required for session recovery behavior")
+def test_active_session_404_behavior_preserves_draft_and_opens_fresh_composer():
+    """Execute the real loadSession() 404 path and recovery helper together.
+
+    This catches runtime-only failures that source assertions cannot, while the
+    stubs model only browser services outside the behavior under test.
+    """
+    script = f"""
+const src = {SESSIONS_JS!r};
+function extractFunc(name) {{
+  const re = new RegExp('(?:async\\\\s+)?function\\\\s+' + name + '\\\\s*\\\\(');
+  const start = src.search(re);
+  if (start < 0) throw new Error(name + ' not found');
+  let i = src.indexOf('{{', start), depth = 1; i++;
+  while (depth > 0 && i < src.length) {{
+    if (src[i] === '{{') depth++;
+    else if (src[i] === '}}') depth--;
+    i++;
+  }}
+  return src.slice(start, i);
+}}
+const nodes = {{
+  msg: {{ value:'unsent draft' }},
+  msgInner: {{ innerHTML:'old transcript' }},
+  emptyState: {{ style:{{display:'none'}} }},
+  topbarTitle: {{ textContent:'Old chat' }},
+  topbarMeta: {{ textContent:'3 messages' }},
+}};
+function $(id) {{ return nodes[id] || null; }}
+var S = {{
+  session:{{session_id:'dead-active', title:'Old chat'}},
+  messages:[{{role:'user',content:'old'}}], entries:[{{kind:'old'}}],
+  toolCalls:[{{id:'tool'}}], busy:true, activeStreamId:'stream-1',
+  pendingFiles:[{{name:'keep-me.txt'}}], _pendingSessionToolsets:['old'],
+}};
+var INFLIGHT = {{'dead-active':{{messages:[]}}}};
+var _loadSessionGeneration=0, _loadingSessionId=null;
+var _messagesTruncated=true, _oldestIdx=4, _loadingOlder=true;
+var _pendingCarryForwardSnapshot=null, _yoloEnabled=true;
+var _messageUserUnpinned=false, _scrollPinned=true;
+var clearedInflight=[], calls=[], toasts=[];
+var localStorage = {{
+  data:{{'hermes-webui-session':'dead-active'}},
+  removeItem(k){{ delete this.data[k]; }},
+  getItem(k){{ return this.data[k] || null; }},
+}};
+var history = {{ path:'/session/dead-active', replaceState(_a,_b,path){{ this.path=path; }} }};
+var window = {{ _clearPendingSelections(){{ calls.push('clearSelections'); }} }};
+function _appRootPath(){{ return '/'; }}
+function _rearmActiveSessionStream(){{}}
+function stopApprovalPolling(){{}} function hideApprovalCard(){{}}
+function stopSessionStream(){{}} function _updateYoloPill(){{}}
+function stopClarifyPolling(){{}} function hideClarifyCard(){{}}
+function clearCompressionUi(){{}} function _captureSameSessionForceReloadHint(){{}}
+function _clearSameSessionForceReloadHint(){{ calls.push('clearReloadHint'); }}
+function _sessionProfileMismatchFromError(){{ return null; }}
+function clearInflightState(sid){{ clearedInflight.push(sid); }}
+function clearOptimisticSessionStreaming(sid){{ calls.push('clearStreaming:'+sid); }}
+function clearLiveToolCards(){{ calls.push('clearTools'); }}
+function removeThinking(){{ calls.push('removeThinking'); }}
+function _hydrateTodosFromSession(value){{ calls.push(value===null?'clearTodos':'hydrateTodos'); }}
+function updateSendBtn(){{ calls.push('sendReady'); }}
+function setComposerStatus(value){{ calls.push('composer:'+value); }}
+function updateQueueBadge(){{ calls.push('queueReady'); }}
+function assistantDisplayName(){{ return 'Sentry'; }}
+function syncTopbar(){{ calls.push('topbar'); }}
+function syncWorkspacePanelState(){{ calls.push('workspace'); }}
+async function renderSessionList(){{ calls.push('sessions'); }}
+function showToast(message){{ toasts.push(message); }}
+async function api(){{ const error=new Error('missing'); error.status=404; throw error; }}
+globalThis._resetUnavailableActiveSession=(0,eval)('('+extractFunc('_resetUnavailableActiveSession')+')');
+globalThis.loadSession=(0,eval)('('+extractFunc('loadSession')+')');
+(async()=>{{
+  await loadSession('dead-active',{{force:true,skipLineageResolve:true,skipExtHooks:true}});
+  await Promise.resolve();
+  console.log(JSON.stringify({{
+    session:S.session, messages:S.messages, entries:S.entries, toolCalls:S.toolCalls,
+    busy:S.busy, activeStreamId:S.activeStreamId, pendingFiles:S.pendingFiles,
+    pendingToolsets:S._pendingSessionToolsets, stored:localStorage.getItem('hermes-webui-session'),
+    path:history.path, inner:nodes.msgInner.innerHTML, empty:nodes.emptyState.style.display,
+    title:nodes.topbarTitle.textContent, meta:nodes.topbarMeta.textContent,
+    input:nodes.msg.value, inflight:INFLIGHT['dead-active'] || null,
+    clearedInflight, calls, toasts,
+  }}));
+}})().catch(error=>{{ console.error(error); process.exitCode=1; }});
+"""
+    result = subprocess.run(
+        [NODE],
+        input=script,
+        cwd=str(REPO),
+        capture_output=True,
+        encoding="utf-8",
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    state = json.loads(result.stdout)
+    assert state["session"] is None
+    assert state["messages"] == []
+    assert state["entries"] == []
+    assert state["toolCalls"] == []
+    assert state["busy"] is False
+    assert state["activeStreamId"] is None
+    assert state["pendingFiles"] == [{"name": "keep-me.txt"}]
+    assert state["pendingToolsets"] is None
+    assert state["stored"] is None
+    assert state["path"] == "/"
+    assert state["inner"] == ""
+    assert state["empty"] == ""
+    assert state["title"] == "Sentry"
+    assert state["meta"] == "Start a new conversation"
+    assert state["input"] == "unsent draft"
+    assert state["inflight"] is None
+    assert state["clearedInflight"] == ["dead-active"]
+    assert "sessions" in state["calls"]
+    assert state["toasts"] == [
+        "That session is no longer available. Start a new conversation."
+    ]
 
 
 def test_send_chat_start_404_self_heals_instead_of_error_bubble():
