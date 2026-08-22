@@ -11837,8 +11837,9 @@ function syncTopbar(){
     // Update profile chip even when no session is active (e.g. right after profile switch)
     const _profileLabel=$('profileChipLabel');
     if(_profileLabel) _profileLabel.textContent=S.activeProfile||'default';
+    if(_profileLabel&&typeof _profileChipDisplayLabel==='function') _profileLabel.textContent=_profileChipDisplayLabel();
     const _titleLabel=$('titlebarProfileLabel');
-    if(_titleLabel) _titleLabel.textContent=S.activeProfile||'default';
+    if(_titleLabel) _titleLabel.textContent=(typeof _profileChipDisplayLabel==='function')?_profileChipDisplayLabel():(S.activeProfile||'default');
     return;
   }
   const sessionTitle=S.session.title||t('untitled');
@@ -11964,8 +11965,9 @@ function syncTopbar(){
   // unaffected by this line.
   const profileLabel=$('profileChipLabel');
   if(profileLabel) profileLabel.textContent=S.activeProfile||'default';
+  if(profileLabel&&typeof _profileChipDisplayLabel==='function') profileLabel.textContent=_profileChipDisplayLabel();
   const titleLabel=$('titlebarProfileLabel');
-  if(titleLabel) titleLabel.textContent=S.activeProfile||'default';
+  if(titleLabel) titleLabel.textContent=(typeof _profileChipDisplayLabel==='function')?_profileChipDisplayLabel():(S.activeProfile||'default');
 }
 
 function msgContent(m){

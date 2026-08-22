@@ -91,11 +91,11 @@ const SENTRY_PANEL_GUIDES = {
     demo:'Open Codex Work',
   },
   profiles:{
-    title:'Agent profiles',
-    purpose:'Inspect the isolated Sentry identity that owns this sign-in’s conversations, memory, jobs, subscriptions, and audit history.',
-    steps:['Select the profile to inspect its identity and active status.','Use Agent to manage subscriptions owned by this profile.','Sign in with a different identity when you need a different isolated scope.'],
-    faq:[['Why is there no switch button?','The browser token is bound to one profile, so Sentry will not silently swap identities.'],['Are provider sign-ins global?','No. Subscription connections belong to the signed-in profile.']],
-    demo:'Refresh profiles',
+    title:'Agent behavior',
+    purpose:'Set persistent instructions for how your signed-in Sentry agent communicates and works.',
+    steps:['Describe the behavior you want in plain language.','Save it to this signed-in profile.','Start your next Chat or Work turn; Sentry applies it automatically across linked models.'],
+    faq:[['Does this switch accounts?','No. Your sign-in already selects the profile; this screen controls how that profile’s agent behaves.'],['Can behavior bypass approvals or safety rules?','No. It is a user preference layer below system, project, workspace, approval, privacy, and safety rules.'],['Does it reach Codex Work?','Yes. Sentry adds the saved behavior to the signed native work order sent to your linked Codex runtime.']],
+    demo:'Focus behavior editor',
   },
   todos:{
     title:'Live plan',
@@ -141,6 +141,10 @@ function _isSentryProductMode(){
   return Array.isArray(items)&&items.some(item=>item&&item.id==='chat')&&items.some(item=>item&&item.id==='work');
 }
 
+function _profileChipDisplayLabel(){
+  return _isSentryProductMode() ? 'Behavior' : (S.activeProfile || 'default');
+}
+
 function _setSentryNavigationLabel(panel,label){
   document.querySelectorAll(`[data-panel="${panel}"]`).forEach(tab=>{
     tab.setAttribute('data-tooltip',label);
@@ -155,6 +159,27 @@ function _configureSentryNavigation(){
   _setSentryNavigationLabel('kanban','Work board');
   _setSentryNavigationLabel('todos','Live plan');
   _setSentryNavigationLabel('logs','Activity');
+  _setSentryNavigationLabel('profiles','Agent behavior');
+  const profileHead=$('panelProfiles')&&$('panelProfiles').querySelector('.panel-head>span');
+  if(profileHead) profileHead.textContent='Agent behavior';
+  const profileChip=$('profileChip');
+  if(profileChip){
+    profileChip.classList.add('sentry-profile-behavior-chip');
+    profileChip.title='Agent behavior';
+    profileChip.setAttribute('aria-label','Open agent behavior');
+    profileChip.setAttribute('aria-haspopup','false');
+    profileChip.removeAttribute('aria-controls');
+  }
+  const profileLabel=$('profileChipLabel');
+  if(profileLabel) profileLabel.textContent=_profileChipDisplayLabel();
+  const titlebarProfile=$('titlebarProfileBtn');
+  if(titlebarProfile){
+    titlebarProfile.title='Agent behavior';
+    titlebarProfile.setAttribute('aria-label','Open agent behavior');
+    titlebarProfile.setAttribute('aria-haspopup','false');
+  }
+  const titlebarLabel=$('titlebarProfileLabel');
+  if(titlebarLabel) titlebarLabel.textContent=_profileChipDisplayLabel();
 }
 
 function _configureSentrySettings(){
@@ -270,7 +295,7 @@ async function runFeatureGuideDemo(){
   if(panel==='skills') {await loadSkills(true);return;}
   if(panel==='memory') {await loadMemory();const first=$('memoryPanel')&&$('memoryPanel').querySelector('button,[role="button"]');if(first)first.click();return;}
   if(panel==='workspaces'||panel==='todos') {await switchPanel('chat');if(typeof selectExperience==='function')await selectExperience('work');const msg=$('msg');if(msg)msg.focus();return;}
-  if(panel==='profiles') {await loadProfilesPanel();return;}
+  if(panel==='profiles') {await loadProfilesPanel();const editor=$('sentryProfileBehaviorContent');if(editor)editor.focus({preventScroll:true});return;}
   if(panel==='insights') {await loadInsights(true);return;}
   if(panel==='logs') {await loadLogs(true);return;}
   if(panel==='agentadmin') {if(typeof loadAgentAdmin==='function')await loadAgentAdmin();return;}
@@ -306,6 +331,7 @@ function syncAppTitlebar() {
   } else {
     const key = APP_TITLEBAR_KEYS[panel];
     mainText = key && typeof t === 'function' ? t(key) : (panel.charAt(0).toUpperCase() + panel.slice(1));
+    if(panel==='profiles'&&_isSentryProductMode()) mainText='Agent behavior';
   }
 
   // Don't touch the element while an inline rename is in progress — replacing
@@ -7240,6 +7266,7 @@ let _profileDropdownFetchPromise = null;
 let _profileDropdownCacheLoadedFromStorage = false;
 const PROFILE_DROPDOWN_CACHE_KEY = 'hermes-webui-profile-dropdown-cache-v1';
 const PROFILE_DROPDOWN_CACHE_TTL_MS = 5 * 60 * 1000;
+const SENTRY_PROFILE_BEHAVIOR_MAX_CHARS = 8000;
 let _profileSwitchGeneration = 0;
 let _profileDropdownTrigger = null;  // tracks which element triggered the dropdown
 let _profileDropdownOpenGeneration = 0;
@@ -7405,6 +7432,21 @@ async function loadProfilesPanel() {
       newProfileBtn.style.display = data.single_profile_mode ? 'none' : '';
     }
 
+    // Sentry authentication already selects exactly one profile.  In this
+    // product mode, presenting that identity as a switcher is both redundant
+    // and misleading.  Use the existing profile-scoped soul store as the
+    // signed-in agent's durable behavior instead.
+    if (_isSentryProductMode() && data.single_profile_mode) {
+      let memory;
+      try {
+        memory = await api('/api/memory');
+      } catch (error) {
+        memory = {unavailable: true, error: error && error.message ? error.message : String(error)};
+      }
+      _renderSentryProfileBehavior(data, memory);
+      return;
+    }
+
     // In single profile mode, don't show the explanatory card
     if (!data.single_profile_mode) {
       const explainer = document.createElement('div');
@@ -7468,6 +7510,94 @@ async function loadProfilesPanel() {
     }
   } catch (e) {
     panel.innerHTML = `<div style="color:var(--accent);font-size:12px;padding:12px">${esc(t('error_prefix'))}${esc(e.message)}</div>`;
+  }
+}
+
+function _renderSentryProfileBehavior(data, memory){
+  const panel=$('profilesPanel');
+  const title=$('profileDetailTitle');
+  const body=$('profileDetailBody');
+  const empty=$('profileDetailEmpty');
+  if(!panel||!title||!body)return;
+  const profiles=Array.isArray(data&&data.profiles)?data.profiles:[];
+  const profile=profiles.find(item=>item&&item.active)||profiles.find(item=>item&&item.name===(data&&data.active))||profiles[0]||null;
+  const profileName=String((profile&&profile.name)||(data&&data.active)||S.activeProfile||'Signed-in profile');
+  panel.innerHTML='';
+  const card=document.createElement('button');
+  card.type='button';
+  card.className='profile-card active sentry-profile-behavior-nav';
+  card.innerHTML=`<div class="profile-card-header"><div style="min-width:0;flex:1"><div class="profile-card-name">${li('sparkles',14)} ${esc('Agent behavior')}</div><div class="profile-card-meta">${esc(profileName)} · saved for this sign-in</div></div></div>`;
+  card.onclick=()=>{const editor=$('sentryProfileBehaviorContent');if(editor)editor.focus({preventScroll:true});};
+  panel.appendChild(card);
+
+  title.textContent='Agent behavior';
+  if(memory&&memory.unavailable){
+    const detail=memory.error?` ${memory.error}`:'';
+    body.innerHTML=`<div class="main-view-content"><div class="panel-functional-empty"><strong>Agent behavior is temporarily unavailable</strong><span>Sentry could not load this profile’s saved behavior.${esc(detail)}</span><button type="button" class="btn secondary" onclick="loadProfilesPanel()">Try again</button></div></div>`;
+  }else{
+    const behavior=String((memory&&memory.soul)||'');
+    const updatedEpoch=Number(memory&&memory.soul_mtime);
+    const updated=Number.isFinite(updatedEpoch)&&updatedEpoch>0?new Date(updatedEpoch*1000).toLocaleString():'';
+    body.innerHTML=`
+      <div class="main-view-content sentry-profile-behavior-view">
+        <section class="detail-card sentry-profile-behavior-card" aria-labelledby="sentryProfileBehaviorHeading">
+          <div class="detail-card-title" id="sentryProfileBehaviorHeading">How should Sentry behave?</div>
+          <p class="sentry-profile-behavior-copy">Write lasting preferences for tone, decision-making, explanations, and working style. Sentry applies them automatically on the next Chat or Work turn.</p>
+          <label class="sentry-profile-behavior-label" for="sentryProfileBehaviorContent">Persistent instructions</label>
+          <textarea id="sentryProfileBehaviorContent" maxlength="${SENTRY_PROFILE_BEHAVIOR_MAX_CHARS}" placeholder="For example: Be concise by default. Explain tradeoffs before making architectural changes. Ask before making irreversible external changes."></textarea>
+          <div class="sentry-profile-behavior-footer">
+            <span id="sentryProfileBehaviorStatus" aria-live="polite">${updated?`Last saved ${esc(updated)}. `:''}<span id="sentryProfileBehaviorCount">${behavior.length}</span> / ${SENTRY_PROFILE_BEHAVIOR_MAX_CHARS}</span>
+            <button type="button" class="btn primary" id="sentryProfileBehaviorSave" onclick="saveSentryProfileBehavior()">Save behavior</button>
+          </div>
+        </section>
+        <section class="detail-card sentry-profile-behavior-scope">
+          <div class="detail-card-title">Where it applies</div>
+          <div class="detail-row"><div class="detail-row-label">Hermes models</div><div class="detail-row-value">Included automatically with every Chat and Work turn for this profile.</div></div>
+          <div class="detail-row"><div class="detail-row-label">Codex Work</div><div class="detail-row-value">Added to the signed work order sent to your linked Codex runtime.</div></div>
+          <div class="detail-row"><div class="detail-row-label">Priority</div><div class="detail-row-value">A preference layer only. System, project, workspace, approval, privacy, and safety rules remain authoritative.</div></div>
+        </section>
+      </div>`;
+    const editor=$('sentryProfileBehaviorContent');
+    if(editor){
+      editor.value=behavior;
+      editor.addEventListener('input',()=>{
+        const count=$('sentryProfileBehaviorCount');
+        if(count)count.textContent=String(editor.value.length);
+        const status=$('sentryProfileBehaviorStatus');
+        if(status)status.classList.add('is-dirty');
+      });
+    }
+  }
+  body.style.display='';
+  if(empty)empty.style.display='none';
+  _profileMode='read';
+  _currentProfileDetail=profile;
+  _setProfileHeaderButtons('help');
+}
+
+async function saveSentryProfileBehavior(){
+  const editor=$('sentryProfileBehaviorContent');
+  const button=$('sentryProfileBehaviorSave');
+  const status=$('sentryProfileBehaviorStatus');
+  if(!editor||!button)return;
+  const content=editor.value;
+  if(content.length>SENTRY_PROFILE_BEHAVIOR_MAX_CHARS){
+    if(status)status.textContent=`Behavior must be ${SENTRY_PROFILE_BEHAVIOR_MAX_CHARS.toLocaleString()} characters or fewer.`;
+    return;
+  }
+  button.disabled=true;
+  button.setAttribute('aria-busy','true');
+  if(status){status.textContent='Saving behavior…';status.classList.remove('is-dirty','is-error');}
+  try{
+    await api('/api/memory/write',{method:'POST',body:JSON.stringify({section: 'soul',content})});
+    if(_memoryData)_memoryData.soul=content;
+    if(status)status.innerHTML=`Saved for new turns. <span id="sentryProfileBehaviorCount">${content.length}</span> / ${SENTRY_PROFILE_BEHAVIOR_MAX_CHARS}`;
+    showToast('Agent behavior saved');
+  }catch(error){
+    if(status){status.textContent=`Could not save behavior: ${error&&error.message?error.message:String(error)}`;status.classList.add('is-error');}
+  }finally{
+    button.disabled=false;
+    button.removeAttribute('aria-busy');
   }
 }
 
@@ -7650,6 +7780,15 @@ function renderProfileDropdown(data) {
 }
 
 function toggleProfileDropdown(e) {
+  // A Sentry access token is already bound to one profile, so there is
+  // nothing to switch.  Route the same compact control to the profile's real,
+  // persistent behavior editor without flashing a dropdown that immediately
+  // closes when /api/profiles confirms single-profile mode.
+  if (typeof _isSentryProductMode === 'function' && _isSentryProductMode()) {
+    closeProfileDropdown();
+    switchPanel('profiles');
+    return;
+  }
   const dd = $('profileDropdown');
   if (!dd) return;
   if (dd.classList.contains('open')) { closeProfileDropdown(); return; }

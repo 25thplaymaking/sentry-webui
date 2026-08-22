@@ -153,7 +153,7 @@
     avatar.setAttribute('aria-hidden','true');
     var name=el('button','frontir-user-name');
     name.type='button';
-    name.title='Agent profiles';
+    name.title='Agent behavior';
     var gear=el('button','frontir-user-gear');
     gear.type='button';
     gear.setAttribute('aria-label','Settings');
