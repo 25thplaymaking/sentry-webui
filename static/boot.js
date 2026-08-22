@@ -2262,19 +2262,48 @@ $('modelSelect').onchange=async()=>{
   const modelState=(typeof _modelStateForSelect==='function')
     ? _modelStateForSelect($('modelSelect'),selectedModel)
     : {model:selectedModel,model_provider:null};
+  const nativeRuntimeId=(typeof _selectedNativeRuntimeId==='function')?_selectedNativeRuntimeId():'';
+  const nativeRuntime=(nativeRuntimeId&&typeof _nativeRuntimeById==='function')?_nativeRuntimeById(nativeRuntimeId):null;
+  const nativeWorkspaceId=(nativeRuntime&&typeof _nativeWorkspaceIdForNextTurn==='function')
+    ? _nativeWorkspaceIdForNextTurn(nativeRuntime)
+    : null;
   if(typeof clearProfileTransitionReasoningContext==='function') clearProfileTransitionReasoningContext();
   if(typeof closeModelDropdown==='function') closeModelDropdown();
   if(typeof _writePersistedModelState==='function') _writePersistedModelState(modelState.model,modelState.model_provider);
   else try{localStorage.setItem('hermes-webui-model',modelState.model)}catch{}
   if(!S.session){
+    if(nativeRuntimeId){
+      S._pendingExperience='work';
+      S._pendingNativeWorkspaceId=nativeWorkspaceId||null;
+    }
     if(typeof _rememberEmptyComposerModelOverride==='function') _rememberEmptyComposerModelOverride(modelState.model,modelState.model_provider);
     if(typeof syncModelChip==='function') syncModelChip();
     if(typeof syncReasoningChip==='function') syncReasoningChip();
+    if(typeof syncExperienceBar==='function') syncExperienceBar();
+    return;
+  }
+  if(nativeRuntimeId && typeof _currentExperience==='function' && _currentExperience()!=='work'){
+    S._pendingExperience='work';
+    S._pendingNativeWorkspaceId=nativeWorkspaceId||null;
+    if(typeof syncExperienceBar==='function') syncExperienceBar();
+    await newSession(true,{
+      experience:'work',
+      model:modelState.model,
+      model_provider:modelState.model_provider||null,
+      native_workspace_id:nativeWorkspaceId||null,
+    });
+    if(typeof showToast==='function') showToast('Codex models open in Work with native features from your machine.',3200);
     return;
   }
   if(typeof _rememberPendingSessionModel==='function') _rememberPendingSessionModel(S.session.session_id,modelState.model,modelState.model_provider);
   S.session.model=modelState.model;
   S.session.model_provider=modelState.model_provider||null;
+  if(nativeRuntimeId){
+    S._pendingExperience='work';
+    S._pendingNativeWorkspaceId=nativeWorkspaceId||null;
+    S.session.experience='work';
+    S.session.native_workspace_id=nativeWorkspaceId||null;
+  }
   if(typeof syncModelChip==='function') syncModelChip();
   if(typeof syncReasoningChip==='function') syncReasoningChip();
   syncTopbar();
@@ -2287,6 +2316,7 @@ $('modelSelect').onchange=async()=>{
     workspace:S.session.workspace,
     model:modelState.model,
     model_provider:modelState.model_provider||null,
+    native_workspace_id:nativeRuntimeId?(nativeWorkspaceId||null):(S.session.native_workspace_id||null),
   })});
   // NOTE: do NOT clear the pending explicit-pick marker here. It must survive until
   // the NEXT send() consumes it, otherwise the normal "pick → session-update → send"

@@ -67,6 +67,34 @@ class TestEnvelopeShape:
         )
         assert all(group["group_id"] != "xai-oauth" for group in env["groups"])
 
+    def test_native_codex_metadata_survives_the_webui_proxy(self):
+        runtime = {
+            "id": "codex",
+            "available": True,
+            "workspaces": [{"id": "server-work", "modes": ["readOnly", "workspaceWrite"]}],
+            "features": ["threads", "skills", "apps", "mcp", "sandbox"],
+        }
+        env = routes._sentry_models_envelope(
+            ["chatgpt-plan/gpt-5.6-sol"],
+            provider_groups=[{
+                "provider": "OpenAI Codex",
+                "provider_id": "openai-codex",
+                "native_runtime": "codex",
+                "models": [{
+                    "id": "chatgpt-plan/gpt-5.6-sol",
+                    "label": "gpt-5.6-sol",
+                    "native_runtime": "codex",
+                    "experience": "work",
+                }],
+            }],
+            native_runtimes=[runtime],
+        )
+        group = env["groups"][0]
+        assert group["native_runtime"] == "codex"
+        assert group["models"][0]["native_runtime"] == "codex"
+        assert group["models"][0]["experience"] == "work"
+        assert env["native_runtimes"] == [runtime]
+
     def test_aliases_are_used_verbatim(self):
         """No relabeling: the operator's configured alias is what gets picked."""
         env = routes._sentry_models_envelope(["some-odd_alias.v2"])

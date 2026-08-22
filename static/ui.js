@@ -2962,6 +2962,7 @@ window.addEventListener('visibilitychange',()=>{
 // Dynamic model labels -- populated by populateModelDropdown(), fallback to static map
 let _dynamicModelLabels={};
 window._configuredModelBadges=window._configuredModelBadges||{};
+window._nativeRuntimes=window._nativeRuntimes||[];
 const MODEL_STATE_KEY='hermes-webui-model-state';
 const PENDING_SESSION_MODEL_PREFIX='hermes-webui-pending-session-model:';
 const PENDING_SESSION_MODEL_MAX_AGE_MS=10*60*1000;
@@ -3510,6 +3511,10 @@ function _ensureModelOptionInDropdown(modelId, sel, preferredProviderId){
   if(requestedProvider) opt.dataset.model=bareModel;
   const provider=requestedProvider||(badge&&badge.provider)||(rawBadge&&rawBadge.provider)||_providerFromModelValue(value)||'';
   if(provider) opt.dataset.provider=provider;
+  if(String(bareModel||value).startsWith('chatgpt-plan/')){
+    opt.dataset.nativeRuntime='codex';
+    opt.dataset.experience='work';
+  }
   sel.appendChild(opt);
   sel.value=value;
   if(sel.id==='modelSelect'){
@@ -3583,6 +3588,7 @@ async function populateModelDropdown(opts={}){
     window._defaultModel=data.default_model||null;
     window._configuredModelBadges=data.configured_model_badges||{};
     window._experiencePolicies=(data.experiences&&typeof data.experiences==='object')?data.experiences:null;
+    window._nativeRuntimes=Array.isArray(data.native_runtimes)?data.native_runtimes:[];
     window._modelCatalogRestricted=Boolean(data.catalog_restricted);
     window._modelScopeNote=String(data.model_scope_note||'');
     if(typeof syncExperienceBar==='function') syncExperienceBar();
@@ -3653,6 +3659,7 @@ async function populateModelDropdown(opts={}){
       og.label=g.provider;
       if(g.provider_id) og.dataset.provider=g.provider_id;
       if(g.group_id) og.dataset.groupId=g.group_id;
+      if(g.native_runtime) og.dataset.nativeRuntime=g.native_runtime;
       if(g.models_endpoint_error){
         const errorKey=g.provider_id||g.provider||'';
         og.dataset.modelsEndpointError=JSON.stringify(g.models_endpoint_error);
@@ -3662,6 +3669,8 @@ async function populateModelDropdown(opts={}){
         const opt=document.createElement('option');
         opt.value=m.id;
         opt.textContent=m.label;
+        if(m.native_runtime||g.native_runtime) opt.dataset.nativeRuntime=m.native_runtime||g.native_runtime;
+        if(m.experience) opt.dataset.experience=m.experience;
         if(m && (m.supports_fast_tier === true || String(m.supports_fast_tier).toLowerCase()==='true')){
           opt.dataset.fast='1';
         }else if(m && (m.supports_fast_tier === false || String(m.supports_fast_tier).toLowerCase()==='false')){
@@ -3689,6 +3698,7 @@ async function populateModelDropdown(opts={}){
     }
     _reconcileModelDropdownSelection(sel,data,previousSelection,opts);
     if(typeof syncModelChip==='function') syncModelChip();
+    if(typeof syncNativeRuntimeBar==='function') syncNativeRuntimeBar();
     const dd=$('composerModelDropdown');
     if(dd&&dd.classList.contains('open')&&typeof renderModelDropdown==='function'){
       renderModelDropdown();
@@ -4344,7 +4354,7 @@ function renderModelDropdown(){
         const displayName=rawValue.startsWith('@custom:')
           ? getModelLabel(rawValue)
           : (opt.textContent||getModelLabel(rawValue));
-        const entry={value:opt.value,name:esc(displayName),id:esc(opt.value),group:child.label||'',groupKey,providerId,modelsEndpointError,badge:_getConfiguredModelBadge(opt.value,_badgeMap,providerId),hiddenByDefault:false};
+        const entry={value:opt.value,name:esc(displayName),id:esc(opt.value),group:child.label||'',groupKey,providerId,modelsEndpointError,badge:_getConfiguredModelBadge(opt.value,_badgeMap,providerId),nativeRuntime:_modelOptionNativeRuntime(opt),hiddenByDefault:false};
         _modelData.push(entry);
         groupMeta.modelCount++;
       }
@@ -4361,6 +4371,7 @@ function renderModelDropdown(){
           providerId,
           modelsEndpointError,
           badge:_getConfiguredModelBadge(overflowModel.id,_badgeMap,providerId),
+          nativeRuntime:String((child.dataset&&child.dataset.nativeRuntime)||''),
           hiddenByDefault:true,
         });
         groupMeta.modelCount++;
@@ -4378,7 +4389,7 @@ function renderModelDropdown(){
       const displayName=rawValue.startsWith('@custom:')
         ? getModelLabel(rawValue)
         : (child.textContent||getModelLabel(rawValue));
-      _modelData.push({value:child.value,name:esc(displayName),id:esc(child.value),group:'',groupKey,providerId:'',badge:_getConfiguredModelBadge(child.value,_badgeMap),hiddenByDefault:false});
+      _modelData.push({value:child.value,name:esc(displayName),id:esc(child.value),group:'',groupKey,providerId:'',badge:_getConfiguredModelBadge(child.value,_badgeMap),nativeRuntime:_modelOptionNativeRuntime(child),hiddenByDefault:false});
       _groupMeta.get(groupKey).modelCount++;
     }
   }
@@ -4428,6 +4439,9 @@ function renderModelDropdown(){
   const _selectedModelBadge=(m)=>_isSelectedModelRow(m)
     ?`<span class="model-opt-badge model-opt-badge--selected">${esc(t('model_badge_selected')||'Selected')}</span>`
     :'';
+  const _nativeModelBadge=(m)=>(m&&m.nativeRuntime)||String((m&&m.value)||'').startsWith('chatgpt-plan/')
+    ?'<span class="model-opt-badge model-opt-badge--native">Native Work</span>'
+    :'';
   const _renderProviderEndpointHint=(entry,parent)=>{
     if(!entry||!entry.label||!entry.modelsEndpointError) return;
     const hint=document.createElement('div');
@@ -4441,9 +4455,10 @@ function renderModelDropdown(){
     const row=document.createElement('div');
     row.className='model-opt'+(_isSelectedModelRow(m)?' active':'');
     const badgeHtml=m.badge?`<span class="model-opt-badge model-opt-badge--${esc(m.badge.role||'configured')}">${esc(m.badge.label||'Configured')}</span>`:'';
+    const nativeBadge=_nativeModelBadge(m);
     const _plainGroup=m.group?String(m.group).replace(/\s*\(\d+\s+of\s+\d+\)\s*$/,''):'';
     const providerChip=(_plainGroup&&withProviderChip)?`<span class="model-opt-provider">${esc(_plainGroup)}</span>`:'';
-    row.innerHTML=`<div class="model-opt-top"><span class="model-opt-name">${esc(m.name)}</span>${badgeHtml}${_selectedModelBadge(m)}${providerChip}</div><span class="model-opt-id">${esc(m.id)}</span>`;
+    row.innerHTML=`<div class="model-opt-top"><span class="model-opt-name">${esc(m.name)}</span>${badgeHtml}${nativeBadge}${_selectedModelBadge(m)}${providerChip}</div><span class="model-opt-id">${esc(m.id)}</span>`;
     row.onclick=()=>selectFromDropdown(m.value,m.providerId||(m.badge&&m.badge.provider)||null);
     return row;
   };
@@ -4562,7 +4577,7 @@ function renderModelDropdown(){
     const _plainGroup=m.group?String(m.group).replace(/\s*\(\d+\s+of\s+\d+\)\s*$/,''):'';
     const _underOwnHeading=shouldRenderHeading&&!!(m.groupKey&&_groupWrappers[m.groupKey]);
     const providerChip=(_plainGroup&&!_underOwnHeading)?`<span class="model-opt-provider">${esc(_plainGroup)}</span>`:'';
-    row.innerHTML=`<div class="model-opt-top"><span class="model-opt-name">${esc(m.name)}</span>${badgeHtml}${_selectedModelBadge(m)}${providerChip}</div><span class="model-opt-id">${esc(m.id)}</span>`;
+    row.innerHTML=`<div class="model-opt-top"><span class="model-opt-name">${esc(m.name)}</span>${badgeHtml}${_nativeModelBadge(m)}${_selectedModelBadge(m)}${providerChip}</div><span class="model-opt-id">${esc(m.id)}</span>`;
     row.onclick=()=>selectFromDropdown(m.value,m.providerId||(m.badge&&m.badge.provider)||null);
     return row;
   };
@@ -4663,7 +4678,7 @@ function renderModelDropdown(){
           }
         }
         const badgeHtml=m.badge?`<span class="model-opt-badge model-opt-badge--${esc(m.badge.role||'configured')}">${esc(badgeLabel)}</span>`:'';
-        row.innerHTML=`<div class="model-opt-top"><span class="model-opt-name">${esc(modelName)}</span>${badgeHtml}${_selectedModelBadge(m)}</div><span class="model-opt-id">${esc(m.id)}</span>`;
+        row.innerHTML=`<div class="model-opt-top"><span class="model-opt-name">${esc(modelName)}</span>${badgeHtml}${_nativeModelBadge(m)}${_selectedModelBadge(m)}</div><span class="model-opt-id">${esc(m.id)}</span>`;
         row.onclick=()=>selectFromDropdown(m.value,(m.badge&&m.badge.provider)||m.providerId||null);
         dd.appendChild(row);
       }
@@ -4863,6 +4878,20 @@ function renderModelDropdown(){
     dd.appendChild(_custRow);
   }
   _filterModels('');
+}
+
+function _modelOptionNativeRuntime(opt){
+  if(!opt) return '';
+  const direct=String((opt.dataset&&opt.dataset.nativeRuntime)||'').trim();
+  if(direct) return direct;
+  const group=opt.parentElement;
+  const grouped=group&&group.dataset?String(group.dataset.nativeRuntime||'').trim():'';
+  if(grouped) return grouped;
+  return String(opt.value||'').startsWith('chatgpt-plan/')?'codex':'';
+}
+
+function _selectedNativeRuntimeId(){
+  return _modelOptionNativeRuntime(_selectedModelOption());
 }
 
 async function selectModelFromDropdown(value){
@@ -11040,6 +11069,111 @@ function _renderExperienceAccess(item,policies){
   addSection(item.id==='chat'?'Available in Chat':'Available in Work',item.available,'is-available');
   addSection('Not available in Chat',item.blocked,'is-blocked');
 }
+function _nativeRuntimeById(id){
+  return (Array.isArray(window._nativeRuntimes)?window._nativeRuntimes:[])
+    .find(runtime=>runtime&&String(runtime.id||'')===String(id||''))||null;
+}
+function _nativeWorkspaceIdForNextTurn(runtime){
+  const workspaces=runtime&&Array.isArray(runtime.workspaces)?runtime.workspaces:[];
+  const available=new Set(workspaces.map(item=>String((item&&item.id)||'')).filter(Boolean));
+  const requested=String(
+    (S.session&&S.session.native_workspace_id)
+    ||S._pendingNativeWorkspaceId
+    ||''
+  ).trim();
+  if(requested&&available.has(requested)) return requested;
+  return workspaces.length?String(workspaces[0].id||''):'';
+}
+function _setNativeRuntimeFeaturesOpen(open){
+  const panel=$('nativeRuntimeFeatures');
+  const button=$('nativeRuntimeFeaturesBtn');
+  if(panel) panel.hidden=!open;
+  if(button) button.setAttribute('aria-expanded',open?'true':'false');
+}
+function toggleNativeRuntimeFeatures(event){
+  if(event&&typeof event.stopPropagation==='function') event.stopPropagation();
+  const panel=$('nativeRuntimeFeatures');
+  _setNativeRuntimeFeaturesOpen(Boolean(panel&&panel.hidden));
+}
+function syncNativeRuntimeBar(){
+  const bar=$('nativeRuntimeBar');
+  const select=$('nativeWorkspaceSelect');
+  if(!bar||!select) return;
+  const runtimeId=typeof _selectedNativeRuntimeId==='function'?_selectedNativeRuntimeId():'';
+  if(!runtimeId){
+    bar.hidden=true;
+    _setNativeRuntimeFeaturesOpen(false);
+    return;
+  }
+  const runtime=_nativeRuntimeById(runtimeId)||{id:runtimeId,available:false,workspaces:[],features:[],reason:'This native runtime is not connected.'};
+  bar.hidden=false;
+  bar.classList.toggle('is-offline',!runtime.available);
+  const status=$('nativeRuntimeStatus');
+  if(status){
+    const connected=[runtime.node_name,runtime.version].filter(Boolean).join(' · ');
+    status.textContent=runtime.available?(connected||'Connected'):String(runtime.reason||'Not connected');
+  }
+  const workspaceId=_nativeWorkspaceIdForNextTurn(runtime);
+  select.innerHTML='';
+  for(const workspace of (Array.isArray(runtime.workspaces)?runtime.workspaces:[])){
+    if(!workspace||!workspace.id) continue;
+    const option=document.createElement('option');
+    option.value=String(workspace.id);
+    option.textContent=String(workspace.id);
+    select.appendChild(option);
+  }
+  if(!select.options.length){
+    const option=document.createElement('option');
+    option.value='';
+    option.textContent='No local workspace connected';
+    select.appendChild(option);
+  }
+  select.value=workspaceId;
+  select.disabled=!runtime.available||!workspaceId;
+
+  const features=$('nativeRuntimeFeatures');
+  if(features){
+    features.innerHTML='';
+    const heading=document.createElement('div');
+    heading.className='native-runtime-feature-heading';
+    heading.textContent='Active from your Codex installation';
+    features.appendChild(heading);
+    const list=document.createElement('div');
+    list.className='native-runtime-feature-list';
+    for(const feature of (Array.isArray(runtime.features)?runtime.features:[])){
+      const chip=document.createElement('span');
+      chip.className='native-runtime-feature';
+      chip.textContent=String(feature).replace(/-/g,' ');
+      list.appendChild(chip);
+    }
+    features.appendChild(list);
+    const boundary=document.createElement('div');
+    boundary.className='native-runtime-boundary';
+    boundary.textContent='Threads, project instructions, skills, apps, MCP, sandboxing, approvals, and local workspace actions run through the official Codex App Server on your machine.';
+    features.appendChild(boundary);
+  }
+}
+async function selectNativeWorkspace(value){
+  const workspaceId=String(value||'').trim();
+  if(!workspaceId) return;
+  S._pendingNativeWorkspaceId=workspaceId;
+  if(!S.session) return;
+  const previous=S.session.native_workspace_id||null;
+  S.session.native_workspace_id=workspaceId;
+  try{
+    const data=await api('/api/session/update',{method:'POST',body:JSON.stringify({
+      session_id:S.session.session_id,
+      workspace:S.session.workspace,
+      native_workspace_id:workspaceId,
+    })});
+    _applySessionContextMetadataUpdate(data);
+    if(typeof showToast==='function') showToast('Local Codex workspace updated for the next turn.',2200);
+  }catch(error){
+    S.session.native_workspace_id=previous;
+    syncNativeRuntimeBar();
+    throw error;
+  }
+}
 function syncExperienceBar(){
   const bar=$('experienceBar');
   const main=$('mainChat');
@@ -11052,6 +11186,7 @@ function syncExperienceBar(){
   if(!enabled){
     main.removeAttribute('data-experience');
     if(document.body) document.body.removeAttribute('data-sentry-experience');
+    if(typeof syncNativeRuntimeBar==='function') syncNativeRuntimeBar();
     return;
   }
   const mode=_currentExperience();
@@ -11098,6 +11233,7 @@ function syncExperienceBar(){
       if(label) label.textContent=copy[index][1];
     });
   }
+  if(typeof syncNativeRuntimeBar==='function') syncNativeRuntimeBar();
 }
 async function selectExperience(value){
   const next=_normalizeExperience(value);

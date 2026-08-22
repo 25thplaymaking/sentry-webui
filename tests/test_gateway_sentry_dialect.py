@@ -41,6 +41,84 @@ class TestTranslate:
     def test_non_dict_is_empty(self):
         assert gc._translate_sentry_event("nope") == []
 
+    def test_native_codex_approval_becomes_an_actionable_approval_card(self):
+        translated = gc._translate_sentry_event({
+            "type": "approval.required",
+            "summary": "Approve command execution",
+            "evidence": {
+                "runtime": "codex",
+                "work_order_id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+                "request_id": "rpc-7",
+                "native_method": "item/commandExecution/requestApproval",
+                "native": {"params": {"command": "git status"}},
+            },
+        })
+        assert translated[0][0] == "approval"
+        pending = translated[0][1]
+        assert pending["command"] == "git status"
+        assert pending["_sentry_native_request_id"] == "rpc-7"
+        assert pending["allow_always"] is False
+
+    def test_native_codex_multi_question_input_preserves_each_question(self):
+        translated = gc._translate_sentry_event({
+            "type": "needs.input",
+            "summary": "Codex needs your input",
+            "evidence": {
+                "runtime": "codex",
+                "work_order_id": "wo-1",
+                "request_id": "rpc-8",
+                "native_method": "item/tool/requestUserInput",
+                "native": {"params": {"questions": [
+                    {"id": "scope", "header": "Scope", "question": "Which scope?", "options": [{"label": "Small", "description": "Focused"}]},
+                    {"id": "name", "header": "Name", "question": "What name?", "options": None},
+                ]}},
+            },
+        })
+        assert translated[0][0] == "clarify"
+        pending = translated[0][1]
+        assert [question["id"] for question in pending["native_questions"]] == ["scope", "name"]
+        assert pending["timeout_seconds"] == 0
+
+
+class TestNativeResponses:
+    def test_approval_choices_are_transport_neutral(self):
+        assert gc.sentry_native_approval_result("once") == {"decision": "once"}
+        assert gc.sentry_native_approval_result("always") == {"decision": "session"}
+        assert gc.sentry_native_approval_result("deny") == {"decision": "deny"}
+
+    def test_request_user_input_maps_all_question_ids(self):
+        pending = {
+            "_sentry_native_method": "item/tool/requestUserInput",
+            "_sentry_native_params": {"questions": [{"id": "scope"}, {"id": "name"}]},
+        }
+        assert gc.sentry_native_input_result(
+            pending,
+            "Scope: Small; Name: Sentry",
+            {"scope": ["Small"], "name": ["Sentry"]},
+        ) == {
+            "answers": {
+                "scope": {"answers": ["Small"]},
+                "name": {"answers": ["Sentry"]},
+            }
+        }
+
+    def test_mcp_form_coerces_typed_fields(self):
+        pending = {
+            "_sentry_native_method": "mcpServer/elicitation/request",
+            "_sentry_native_params": {
+                "mode": "form",
+                "requestedSchema": {"properties": {
+                    "count": {"type": "integer"},
+                    "enabled": {"type": "boolean"},
+                }},
+            },
+        }
+        assert gc.sentry_native_input_result(
+            pending,
+            "submitted",
+            {"count": ["3"], "enabled": ["yes"]},
+        ) == {"action": "accept", "content": {"count": 3, "enabled": True}}
+
 
 class _DummyResp:
     def __enter__(self):
@@ -86,6 +164,25 @@ class TestStreaming:
             experience="chat",
         )
         assert captured["experience"] == "chat"
+
+    def test_named_native_workspace_is_sent_without_a_local_path(self, monkeypatch):
+        captured = {}
+
+        def _open(req, timeout=None):
+            captured.update(json.loads(req.data.decode("utf-8")))
+            return _DummyResp()
+
+        monkeypatch.setattr(gc.urllib.request, "urlopen", _open)
+        monkeypatch.setattr(gc, "_iter_sse_lines_cancellable", _feed(["data: [DONE]"]))
+        gc._run_sentry_turn_streaming(
+            "sess", "hi", "sid", "http://gw", "key",
+            put_gateway_event=lambda *_: None,
+            cancel_event=threading.Event(),
+            model="chatgpt-plan/gpt-5.6-sol",
+            workspace_id="server-work",
+        )
+        assert captured["workspace_id"] == "server-work"
+        assert "C:\\" not in json.dumps(captured)
 
     def test_incremental_messages_accumulate_and_stream_tokens(self, monkeypatch):
         (final_text, _usage), events = _run(monkeypatch, [

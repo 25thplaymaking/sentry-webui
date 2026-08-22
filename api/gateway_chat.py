@@ -447,6 +447,125 @@ def _maybe_refresh_sentry_token(cookie_value, access_token, refresh_token, *, sk
         return access_token
 
 
+def _native_request_context(payload) -> tuple[str, str, str, dict] | None:
+    """Return the exact native request identity and sanitized params, if any."""
+    evidence = payload.get("evidence") if isinstance(payload, dict) else None
+    if not isinstance(evidence, dict) or evidence.get("runtime") != "codex":
+        return None
+    method = str(evidence.get("native_method") or "").strip()
+    request_id = str(evidence.get("request_id") or "").strip()
+    work_order_id = str(evidence.get("work_order_id") or "").strip()
+    native = evidence.get("native")
+    params = native.get("params") if isinstance(native, dict) else None
+    if not method or not request_id or not work_order_id or not isinstance(params, dict):
+        return None
+    return method, request_id, work_order_id, params
+
+
+def _native_command_text(params: dict) -> str:
+    for key in ("command", "cmd", "reason"):
+        value = params.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()[:12000]
+        if isinstance(value, list) and value:
+            return " ".join(str(part) for part in value)[:12000]
+    return ""
+
+
+def _native_form_questions(schema) -> list[dict]:
+    """Project the simple MCP form schema into Sentry's native question rows."""
+    if not isinstance(schema, dict):
+        return []
+    properties = schema.get("properties")
+    if not isinstance(properties, dict):
+        return []
+    required = set(schema.get("required") or [])
+    questions = []
+    for key, spec in list(properties.items())[:12]:
+        if not isinstance(spec, dict):
+            spec = {}
+        choices = spec.get("enum") if isinstance(spec.get("enum"), list) else []
+        questions.append({
+            "id": str(key),
+            "header": str(spec.get("title") or key),
+            "question": str(spec.get("description") or spec.get("title") or key),
+            "options": [
+                {"label": str(value), "description": ""} for value in choices[:30]
+            ],
+            "required": key in required,
+            "value_type": str(spec.get("type") or "string"),
+            "isSecret": bool(spec.get("format") == "password"),
+        })
+    return questions
+
+
+def _native_input_payload(summary: str, context: tuple[str, str, str, dict]) -> dict:
+    method, request_id, work_order_id, params = context
+    questions = []
+    choices = []
+    question_text = summary or "Codex needs your input."
+    if method == "item/tool/requestUserInput":
+        for raw in params.get("questions") or []:
+            if not isinstance(raw, dict) or not raw.get("id"):
+                continue
+            options = [
+                {
+                    "label": str(option.get("label") or ""),
+                    "description": str(option.get("description") or ""),
+                }
+                for option in (raw.get("options") or [])
+                if isinstance(option, dict) and option.get("label")
+            ]
+            questions.append({
+                "id": str(raw.get("id")),
+                "header": str(raw.get("header") or "Input"),
+                "question": str(raw.get("question") or "Codex needs your input."),
+                "options": options,
+                "isOther": bool(raw.get("isOther")),
+                "isSecret": bool(raw.get("isSecret")),
+                "required": True,
+                "value_type": "string",
+            })
+        if questions:
+            question_text = "\n".join(
+                f"{index + 1}. {item['question']}" for index, item in enumerate(questions)
+            )
+            if len(questions) == 1:
+                choices = [option["label"] for option in questions[0]["options"]]
+    elif method == "mcpServer/elicitation/request":
+        question_text = str(params.get("message") or summary or "A connected tool needs your input.")
+        mode = str(params.get("mode") or "")
+        if mode in {"form", "openai/form"}:
+            questions = _native_form_questions(params.get("requestedSchema"))
+        elif mode == "url":
+            url = str(params.get("url") or "").strip()
+            if url:
+                question_text = f"{question_text}\nOpen this link to continue: {url}"
+            questions = [{
+                "id": "confirmation",
+                "header": "Continue",
+                "question": "Confirm when you are ready to continue, or decline.",
+                "options": [
+                    {"label": "Continue", "description": "Resume Codex."},
+                    {"label": "Decline", "description": "Decline this request."},
+                ],
+                "required": True,
+                "value_type": "string",
+            }]
+            choices = ["Continue", "Decline"]
+    return {
+        "question": question_text,
+        "choices_offered": choices,
+        "timeout_seconds": 0,
+        "_sentry_native": True,
+        "_sentry_native_method": method,
+        "_sentry_native_request_id": request_id,
+        "_sentry_native_work_order_id": work_order_id,
+        "_sentry_native_params": params,
+        "native_questions": questions,
+    }
+
+
 def _translate_sentry_event(payload) -> list[tuple[str, dict]]:
     """Map one Sentry Gateway SSE content event to browser events.
 
@@ -498,6 +617,22 @@ def _translate_sentry_event(payload) -> list[tuple[str, dict]]:
         return [("tool_complete" if is_complete else "tool", event_payload)]
 
     if etype in ("approval.required", "needs.input"):
+        native_context = _native_request_context(payload)
+        if native_context is not None:
+            method, request_id, work_order_id, params = native_context
+            if etype == "approval.required":
+                return [("approval", {
+                    "approval_id": f"codex:{work_order_id}:{request_id}",
+                    "description": summary or "Codex needs approval.",
+                    "command": _native_command_text(params),
+                    "_sentry_native": True,
+                    "_sentry_native_method": method,
+                    "_sentry_native_request_id": request_id,
+                    "_sentry_native_work_order_id": work_order_id,
+                    "_sentry_native_params": params,
+                    "allow_always": False,
+                })]
+            return [("clarify", _native_input_payload(summary, native_context))]
         # These were dropped by the same line, and that is worse than cosmetic:
         # the agent blocks waiting for an answer the user was never asked for,
         # so the UI shows "processing" forever. Surface them as a visible notice
@@ -519,6 +654,108 @@ def _translate_sentry_event(payload) -> list[tuple[str, dict]]:
     return []
 
 
+def sentry_native_approval_result(choice: str) -> dict:
+    """Create the transport-neutral decision consumed by the local Codex node."""
+    normalized = str(choice or "deny").strip().lower()
+    if normalized not in {"once", "session", "always", "deny"}:
+        raise ValueError("Invalid native approval choice")
+    return {"decision": "session" if normalized == "always" else normalized}
+
+
+def _coerce_native_form_value(value, value_type: str):
+    raw = value[0] if isinstance(value, list) and value else value
+    if value_type == "boolean":
+        return str(raw or "").strip().lower() in {"1", "true", "yes", "on"}
+    if value_type == "integer":
+        return int(str(raw).strip())
+    if value_type == "number":
+        return float(str(raw).strip())
+    if value_type == "array":
+        if isinstance(value, list):
+            return [str(item) for item in value]
+        return [part.strip() for part in str(raw or "").split(",") if part.strip()]
+    return str(raw or "")
+
+
+def sentry_native_input_result(
+    pending: dict,
+    response: str,
+    native_answers=None,
+) -> dict:
+    """Build the exact App Server response for a native user-input request."""
+    method = str(pending.get("_sentry_native_method") or "")
+    params = pending.get("_sentry_native_params")
+    params = params if isinstance(params, dict) else {}
+    supplied = native_answers if isinstance(native_answers, dict) else {}
+    fallback = str(response or "").strip()
+
+    if method == "item/tool/requestUserInput":
+        answers = {}
+        questions = [q for q in (params.get("questions") or []) if isinstance(q, dict)]
+        for question in questions:
+            question_id = str(question.get("id") or "").strip()
+            if not question_id:
+                continue
+            raw = supplied.get(question_id)
+            if raw is None and len(questions) == 1:
+                raw = fallback
+            values = raw if isinstance(raw, list) else [raw] if raw is not None else []
+            cleaned = [str(value).strip() for value in values if str(value).strip()]
+            if not cleaned:
+                raise ValueError(f"An answer is required for {question_id}.")
+            answers[question_id] = {"answers": cleaned}
+        if not answers:
+            raise ValueError("Codex did not provide any answerable questions.")
+        return {"answers": answers}
+
+    if method == "mcpServer/elicitation/request":
+        if fallback.lower() in {"decline", "deny", "cancel"}:
+            return {"action": "decline" if fallback.lower() != "cancel" else "cancel"}
+        mode = str(params.get("mode") or "")
+        if mode == "url":
+            return {"action": "accept"}
+        schema = params.get("requestedSchema")
+        properties = schema.get("properties") if isinstance(schema, dict) else {}
+        content = {}
+        if isinstance(properties, dict):
+            for key, spec in properties.items():
+                if key not in supplied:
+                    continue
+                value_type = str((spec or {}).get("type") or "string") if isinstance(spec, dict) else "string"
+                content[str(key)] = _coerce_native_form_value(supplied[key], value_type)
+        if not content and fallback:
+            if isinstance(properties, dict) and len(properties) == 1:
+                key, spec = next(iter(properties.items()))
+                value_type = str((spec or {}).get("type") or "string") if isinstance(spec, dict) else "string"
+                content[str(key)] = _coerce_native_form_value(fallback, value_type)
+            else:
+                content["response"] = fallback
+        return {"action": "accept", "content": content}
+
+    return {"response": fallback}
+
+
+def relay_sentry_native_response(token: str, pending: dict, response: dict) -> dict:
+    """Relay one exact native response as the signed-in Sentry user."""
+    work_order_id = str(pending.get("_sentry_native_work_order_id") or "").strip()
+    request_id = str(pending.get("_sentry_native_request_id") or "").strip()
+    if not token:
+        raise SentryIdentityMissing(SENTRY_NO_IDENTITY_MESSAGE)
+    if not work_order_id or not request_id:
+        raise ValueError("Native Codex request identity is incomplete.")
+    from api.sentry_gateway_client import post_json
+
+    return post_json(
+        "/api/chat/native/respond",
+        token,
+        {
+            "work_order_id": work_order_id,
+            "request_id": request_id,
+            "response": response,
+        },
+    ) or {"ok": True}
+
+
 def _run_sentry_turn_streaming(
     session_id,
     msg_text,
@@ -532,6 +769,7 @@ def _run_sentry_turn_streaming(
     timeout=None,
     model=None,
     experience="work",
+    workspace_id=None,
 ):
     """Bridge one WebUI turn through the Sentry Gateway ``/api/chat/turn``.
 
@@ -562,6 +800,8 @@ def _run_sentry_turn_streaming(
     # picker surfaces as a visible error instead of an answer from elsewhere.
     if model:
         body["model"] = str(model)
+    if workspace_id:
+        body["workspace_id"] = str(workspace_id)
     req = urllib.request.Request(
         url, data=json.dumps(body).encode("utf-8"), headers=headers, method="POST"
     )
@@ -606,6 +846,14 @@ def _run_sentry_turn_streaming(
                         usage["model"] = evidence["model"]
                 continue
             for event_name, event_payload in _translate_sentry_event(payload):
+                if event_name == "approval" and event_payload.get("_sentry_native"):
+                    from api.route_approvals import submit_sentry_native_pending
+                    head, total = submit_sentry_native_pending(session_id, event_payload)
+                    event_payload = {**(head or event_payload), "pending_count": total}
+                elif event_name == "clarify" and event_payload.get("_sentry_native"):
+                    from api.clarify import submit_pending
+                    entry = submit_pending(session_id, event_payload)
+                    event_payload = dict(entry.data)
                 if event_name == "token":
                     delta = event_payload.get("text") or ""
                     final_text += delta
@@ -1406,6 +1654,7 @@ def _run_gateway_chat_streaming(
                     cancel_event=cancel_event,
                     model=model,
                     experience=getattr(s, "experience", "work"),
+                    workspace_id=getattr(s, "native_workspace_id", None),
                 )
             except Exception as exc:
                 error_payload = _settle_gateway_terminal_error(

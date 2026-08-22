@@ -10628,6 +10628,7 @@ def _sentry_models_envelope(
     *,
     provider_groups=None,
     experiences=None,
+    native_runtimes=None,
     unavailable: bool = False,
 ) -> dict:
     """Shape the Gateway's linked-provider registry into the picker envelope.
@@ -10658,20 +10659,35 @@ def _sentry_models_envelope(
             model_id = str(raw_model.get("id") or "").strip()
             if not model_id or model_id not in advertised or model_id in claimed:
                 continue
-            provider_models.append({
+            model_entry = {
                 "id": model_id,
                 "label": str(raw_model.get("label") or model_id),
-            })
+            }
+            native_runtime = str(
+                raw_model.get("native_runtime")
+                or raw_group.get("native_runtime")
+                or ""
+            ).strip()
+            if native_runtime:
+                model_entry["native_runtime"] = native_runtime
+            experience = str(raw_model.get("experience") or "").strip()
+            if experience in {"chat", "work"}:
+                model_entry["experience"] = experience
+            provider_models.append(model_entry)
             claimed.add(model_id)
         if provider_models:
-            groups.append({
+            group_entry = {
                 "provider": str(raw_group.get("provider") or "Linked account"),
                 # Every option still routes through the Sentry Gateway. group_id
                 # is presentation-only and keeps linked accounts separated.
                 "provider_id": "sentry",
                 "group_id": str(raw_group.get("provider_id") or "sentry"),
                 "models": provider_models,
-            })
+            }
+            native_runtime = str(raw_group.get("native_runtime") or "").strip()
+            if native_runtime:
+                group_entry["native_runtime"] = native_runtime
+            groups.append(group_entry)
 
     unclaimed = [mid for mid in model_ids if mid in advertised and mid not in claimed]
     if unclaimed:
@@ -10692,11 +10708,14 @@ def _sentry_models_envelope(
         "catalog_restricted": True,
         "live_models_disabled": True,
         "model_scope_note": (
-            "Only models from accounts linked to Sentry are shown. Linked "
-            "accounts provide models; Sentry and Hermes govern skills, plugins, "
-            "memory, workspace, and workstation access."
+            "Only models from accounts linked to Sentry are shown. Models marked "
+            "Native Work activate that provider's local runtime and features; "
+            "other linked models use Hermes capabilities."
         ),
         "experiences": experiences if isinstance(experiences, dict) else None,
+        "native_runtimes": [
+            runtime for runtime in (native_runtimes or []) if isinstance(runtime, dict)
+        ],
     }
 
 
@@ -13330,6 +13349,7 @@ def handle_get(handler, parsed) -> bool:
                 _ids,
                 provider_groups=_payload.get("groups"),
                 experiences=_payload.get("experiences"),
+                native_runtimes=_payload.get("native_runtimes"),
             ))
 
         # Profile-scoping for non-default profiles (#3957) is handled INSIDE
@@ -15132,6 +15152,20 @@ def _validate_session_experience(value, *, default="work"):
     return experience
 
 
+def _validate_native_workspace_id(value):
+    """Validate the opaque allowlisted workspace id used by a native runtime."""
+    if value is None or value == "":
+        return None
+    if not isinstance(value, str):
+        raise ValueError("native_workspace_id must be a string or null")
+    workspace_id = value.strip()
+    if not workspace_id or len(workspace_id) > 200:
+        raise ValueError("native_workspace_id must be between 1 and 200 characters")
+    if any(ord(char) < 32 for char in workspace_id):
+        raise ValueError("native_workspace_id contains invalid characters")
+    return workspace_id
+
+
 def _resolve_new_session_workspace(body, visible_prev_session_id):
     """Resolve a new-session workspace, recovering only verified inheritance."""
     candidate = body.get("workspace")
@@ -15523,6 +15557,9 @@ def handle_post(handler, parsed) -> bool:
     if parsed.path == "/api/session/new":
         try:
             experience = _validate_session_experience(body.get("experience"))
+            native_workspace_id = _validate_native_workspace_id(
+                body.get("native_workspace_id")
+            )
         except ValueError as e:
             return bad(handler, str(e), status=400)
         workspace_prev_session_id = body.get("prev_session_id")
@@ -15649,6 +15686,7 @@ def handle_post(handler, parsed) -> bool:
             worktree_info=worktree_info,
             enabled_toolsets=enabled_toolsets,
             experience=experience,
+            native_workspace_id=native_workspace_id,
         )
         if worktree_info:
             publish_session_list_changed(
@@ -15716,6 +15754,7 @@ def handle_post(handler, parsed) -> bool:
                 personality=session.personality,
                 enabled_toolsets=getattr(session, "enabled_toolsets", None),
                 experience=getattr(session, "experience", "work"),
+                native_workspace_id=getattr(session, "native_workspace_id", None),
                 context_length=getattr(session, "context_length", None),
                 threshold_tokens=getattr(session, "threshold_tokens", None),
                 truncation_watermark=getattr(session, "truncation_watermark", None),
@@ -16161,11 +16200,18 @@ def handle_post(handler, parsed) -> bool:
         old_model = getattr(s, "model", None)
         old_provider = getattr(s, "model_provider", None)
         try:
+            native_workspace_id = _validate_native_workspace_id(
+                body.get("native_workspace_id", getattr(s, "native_workspace_id", None))
+            )
+        except ValueError as e:
+            return bad(handler, str(e), status=400)
+        try:
             new_ws = str(resolve_trusted_workspace(body.get("workspace", s.workspace)))
         except ValueError as e:
             return bad(handler, str(e))
         with _get_session_agent_lock(body["session_id"]):
             s.workspace = new_ws
+            s.native_workspace_id = native_workspace_id
             if "model" in body or "model_provider" in body:
                 model, provider = _session_model_state_from_request(
                     body.get("model", s.model),
@@ -16610,6 +16656,7 @@ def handle_post(handler, parsed) -> bool:
             personality=getattr(source, "personality", None),
             enabled_toolsets=getattr(source, "enabled_toolsets", None),
             experience=getattr(source, "experience", "work"),
+            native_workspace_id=getattr(source, "native_workspace_id", None),
             context_length=getattr(source, "context_length", None),
             threshold_tokens=getattr(source, "threshold_tokens", None),
             # context_messages — truncated to fork prefix (not full parent copy)
@@ -27119,6 +27166,45 @@ def _handle_approval_respond(handler, body):
     requested_run_id = str(body.get("run_id") or "").strip()
     requested_mirror_token = str(body.get("mirror_token") or "").strip()
 
+    # Native Codex approvals use the same visible card, but their parked
+    # producer lives on the outbound workstation node rather than in Hermes'
+    # in-process approval queue. Match the exact typed entry and relay it as the
+    # signed-in user before any legacy/runs-api fallback can claim it.
+    if approval_id:
+        from api.route_approvals import (
+            retire_sentry_native_pending,
+            sentry_native_pending,
+        )
+
+        native_pending = sentry_native_pending(sid, approval_id)
+        if native_pending is not None:
+            from api.gateway_chat import (
+                relay_sentry_native_response,
+                sentry_access_token_from_handler,
+                sentry_native_approval_result,
+            )
+            from api.sentry_gateway_client import SentryGatewayError
+
+            token = sentry_access_token_from_handler(handler)
+            if not token:
+                return bad(handler, "Sentry sign-in expired. Sign in again.", status=401)
+            try:
+                result = relay_sentry_native_response(
+                    token,
+                    native_pending,
+                    sentry_native_approval_result(choice),
+                )
+            except ValueError as exc:
+                return bad(handler, str(exc), status=400)
+            except SentryGatewayError as exc:
+                return bad(handler, str(exc), status=exc.status or 502)
+            retire_sentry_native_pending(sid, approval_id)
+            return j(handler, {
+                "ok": bool(result.get("ok", True)),
+                "choice": choice,
+                "native_runtime": "codex",
+            })
+
     if enable_yolo:
         payload, status = _enable_session_yolo_and_release_pending(
             sid,
@@ -27429,6 +27515,44 @@ def _handle_clarify_respond(handler, body):
     if not response:
         return bad(handler, "response is required")
     clarify_id = body.get("clarify_id", "")
+
+    if clarify_id:
+        from api.clarify import get_pending_by_id
+
+        native_pending = get_pending_by_id(sid, clarify_id)
+        if isinstance(native_pending, dict) and native_pending.get("_sentry_native"):
+            from api.gateway_chat import (
+                relay_sentry_native_response,
+                sentry_access_token_from_handler,
+                sentry_native_input_result,
+            )
+            from api.sentry_gateway_client import SentryGatewayError
+
+            token = sentry_access_token_from_handler(handler)
+            if not token:
+                return bad(handler, "Sentry sign-in expired. Sign in again.", status=401)
+            try:
+                native_result = sentry_native_input_result(
+                    native_pending,
+                    response,
+                    body.get("native_answers"),
+                )
+                result = relay_sentry_native_response(token, native_pending, native_result)
+            except (TypeError, ValueError) as exc:
+                return bad(handler, str(exc), status=400)
+            except SentryGatewayError as exc:
+                return bad(handler, str(exc), status=exc.status or 502)
+            if not resolve_clarify_by_id(sid, clarify_id, response):
+                return j(handler, {
+                    "ok": False,
+                    "error": "Clarification prompt expired or not found.",
+                    "stale": True,
+                }, status=409)
+            return j(handler, {
+                "ok": bool(result.get("ok", True)),
+                "response": response,
+                "native_runtime": "codex",
+            })
 
     from api.runtime_adapter import LegacyJournalRuntimeAdapter, runtime_adapter_enabled
 

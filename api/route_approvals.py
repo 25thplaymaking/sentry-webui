@@ -50,6 +50,7 @@ _GATEWAY_MIRROR_TOKEN = "_gateway_mirror_token"
 _GATEWAY_MIRROR_RETAINED = "_gateway_mirror_retained"
 _GATEWAY_ENTRY_DATA_TOKEN_KEY = "_webui_mirror_token"
 _GATEWAY_AGENT_IDENTITY_V1 = "_gateway_agent_identity_v1"
+_SENTRY_NATIVE_FLAG = "_sentry_native"
 _gateway_relay_owners: dict[tuple[str, str], str] = {}
 _yolo_transition_lock = threading.Lock()
 _yolo_transitions: dict[str, dict] = {}
@@ -566,6 +567,80 @@ def _gateway_mirrored_pending_run_id(session_key: str, approval_id: str) -> str 
         if entry:
             return str(entry.get("run_id") or "").strip() or None
     return None
+
+
+def submit_sentry_native_pending(session_key: str, approval: dict) -> tuple[dict | None, int]:
+    """Publish one exact native-runtime approval through the existing card queue.
+
+    Native Codex responses are relayed by ``/api/approval/respond`` rather than
+    by the in-process Hermes approval event, so the typed marker is mandatory.
+    The request/work-order ids remain opaque and are matched exactly on reply.
+    """
+    entry = dict(approval or {})
+    entry[_SENTRY_NATIVE_FLAG] = True
+    approval_id = str(entry.get("approval_id") or "").strip()
+    if not session_key or not approval_id:
+        return None, 0
+    with _lock:
+        queue_list = _normalize_pending_queue_locked(session_key)
+        existing = next(
+            (
+                item for item in queue_list
+                if isinstance(item, dict)
+                and item.get(_SENTRY_NATIVE_FLAG)
+                and str(item.get("approval_id") or "") == approval_id
+            ),
+            None,
+        )
+        if existing is None:
+            queue_list.append(entry)
+        head, total, _ = reconcile_gateway_pending_mirror_locked(session_key)
+        _approval_sse_notify_locked(session_key, head, total)
+    publish_session_list_changed("attention_pending")
+    return head, total
+
+
+def sentry_native_pending(session_key: str, approval_id: str) -> dict | None:
+    """Return one exact native approval without falling back to the queue head."""
+    with _lock:
+        queue_list = _pending.get(session_key)
+        entries = queue_list if isinstance(queue_list, list) else [queue_list] if queue_list else []
+        for entry in entries:
+            if (
+                isinstance(entry, dict)
+                and entry.get(_SENTRY_NATIVE_FLAG)
+                and str(entry.get("approval_id") or "") == str(approval_id or "")
+            ):
+                return dict(entry)
+    return None
+
+
+def retire_sentry_native_pending(session_key: str, approval_id: str) -> bool:
+    """Remove one answered native approval and publish the next queue head."""
+    removed = False
+    with _lock:
+        queue_list = _pending.get(session_key)
+        entries = queue_list if isinstance(queue_list, list) else [queue_list] if queue_list else []
+        retained = []
+        for entry in entries:
+            matches = (
+                isinstance(entry, dict)
+                and entry.get(_SENTRY_NATIVE_FLAG)
+                and str(entry.get("approval_id") or "") == str(approval_id or "")
+            )
+            if matches:
+                removed = True
+            else:
+                retained.append(entry)
+        if retained:
+            _pending[session_key] = retained
+        else:
+            _pending.pop(session_key, None)
+        head, total, _ = reconcile_gateway_pending_mirror_locked(session_key)
+        _approval_sse_notify_locked(session_key, head, total)
+    if removed:
+        publish_session_list_changed("attention_resolved")
+    return removed
 
 
 def submit_gateway_pending_mirror(session_key: str, approval: dict) -> tuple[dict | None, int]:

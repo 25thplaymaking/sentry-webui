@@ -1443,7 +1443,9 @@ async function newSession(flash, options={}){
     let newModelState=null;
     let consumedExplicitModelOverride=false;
     let usingConfiguredDefault=false;
-    if(!hasLoadedSession&&explicitModelOverride&&explicitModelOverride.model){
+    if(options&&options.model){
+      newModelState={model:options.model,model_provider:options.model_provider||null};
+    }else if(!hasLoadedSession&&explicitModelOverride&&explicitModelOverride.model){
       newModelState=explicitModelOverride;
       consumedExplicitModelOverride=true;
     }else if(window._defaultModel){
@@ -1507,6 +1509,10 @@ async function newSession(flash, options={}){
     reqBody.experience=(typeof _normalizeExperience==='function')
       ? _normalizeExperience(requestedExperience)
       : (String(requestedExperience||'').toLowerCase()==='chat'?'chat':'work');
+    const requestedNativeWorkspace=(options&&Object.prototype.hasOwnProperty.call(options,'native_workspace_id'))
+      ? options.native_workspace_id
+      : ((S.session&&S.session.native_workspace_id)||S._pendingNativeWorkspaceId||null);
+    if(requestedNativeWorkspace) reqBody.native_workspace_id=String(requestedNativeWorkspace);
     const data=await api('/api/session/new',{method:'POST',body:JSON.stringify(reqBody)});
     if(consumedExplicitModelOverride&&typeof _clearEmptyComposerModelOverride==='function'){
       _clearEmptyComposerModelOverride();
@@ -1514,6 +1520,7 @@ async function newSession(flash, options={}){
     S.session=data.session;if(typeof _adoptRegenerationRevision==='function') _adoptRegenerationRevision(data.session);S.messages=data.session.messages||[];
     S._pendingSessionToolsets=null;
     S._pendingExperience=(data.session&&data.session.experience)||reqBody.experience;
+    S._pendingNativeWorkspaceId=(data.session&&data.session.native_workspace_id)||reqBody.native_workspace_id||null;
     if(_sessionSourceFilter==='cli') _sessionSourceFilter='webui';
     if(typeof _hydrateTodosFromSession==='function') _hydrateTodosFromSession(S.session);
     S.lastUsage={...(data.session.last_usage||{})};

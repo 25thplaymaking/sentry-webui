@@ -190,6 +190,18 @@ def get_pending(session_key: str) -> dict | None:
         return dict(pending) if pending else None
 
 
+def get_pending_by_id(session_key: str, clarify_id: str) -> dict | None:
+    """Return one exact queued clarification without substituting another."""
+    clarify_id = str(clarify_id or "").strip()
+    if not clarify_id:
+        return None
+    with _lock:
+        for entry in _gateway_queues.get(session_key) or []:
+            if entry.clarify_id == clarify_id:
+                return dict(entry.data)
+    return None
+
+
 def has_pending(session_key: str) -> bool:
     with _lock:
         return bool(_gateway_queues.get(session_key))

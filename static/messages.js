@@ -7627,6 +7627,10 @@ function showApprovalCard(pending, pendingCount) {
   const sameApproval = card.classList.contains("visible") && _approvalSignature === sig;
   $("approvalDesc").textContent = desc;
   $("approvalCmd").textContent = cmd;
+  const alwaysBtn=$("approvalBtnAlways");
+  if(alwaysBtn) alwaysBtn.hidden=pending.allow_always===false;
+  const skipAllBtn=$("approvalSkipAll");
+  if(skipAllBtn) skipAllBtn.hidden=!!pending._sentry_native;
   _approvalSessionId = sid;
   _approvalCurrentId = pending.approval_id || null;
   _approvalDisplayedOwner = _approvalOwnerForPending(sid, pending);
@@ -8700,6 +8704,7 @@ function hideClarifyCard(force=false, reason="dismissed") {
   $("clarifyQuestion").textContent = "";
   $("clarifyChoices").innerHTML = "";
   $("clarifyInput").value = "";
+  $("clarifyInput").style.display = "";
   $("clarifyInput").disabled = false;
   $("clarifyInput").onkeydown = null;
   const submit = $("clarifySubmit");
@@ -8716,6 +8721,9 @@ function _clarifySetControlsDisabled(disabled, loading=false) {
   }
   const choices = $("clarifyChoices");
   if (choices) {
+    choices.querySelectorAll(".clarify-native-answer").forEach(field => {
+      field.disabled = disabled;
+    });
     choices.querySelectorAll("button").forEach(btn => {
       btn.disabled = disabled;
       if (loading && btn.dataset && btn.dataset.choice === "other") {
@@ -8732,9 +8740,11 @@ function showClarifyCard(pending) {
   const choices = Array.isArray(pending.choices_offered)
     ? pending.choices_offered
     : (Array.isArray(pending.choices) ? pending.choices : []);
+  const nativeQuestions=Array.isArray(pending.native_questions)?pending.native_questions:[];
   const sig = JSON.stringify({
     question,
     choices,
+    nativeQuestions,
     sid: pending._session_id || (S.session && S.session.session_id) || null,
     clarify_id: pending.clarify_id || null,
   });
@@ -8760,8 +8770,49 @@ function showClarifyCard(pending) {
   if (questionEl) questionEl.textContent = question;
   if (choicesEl) {
     choicesEl.innerHTML = '';
-    choicesEl.style.display = choices.length ? '' : 'none';
-    if (choices.length) {
+    choicesEl.style.display = (nativeQuestions.length||choices.length) ? '' : 'none';
+    if(nativeQuestions.length){
+      nativeQuestions.forEach((item,index)=>{
+        if(!item||!item.id) return;
+        const row=document.createElement('label');
+        row.className='clarify-native-question';
+        const header=document.createElement('span');
+        header.className='clarify-native-header';
+        header.textContent=String(item.header||`Question ${index+1}`);
+        const prompt=document.createElement('span');
+        prompt.className='clarify-native-prompt';
+        prompt.textContent=String(item.question||'');
+        const answer=document.createElement('input');
+        answer.className='clarify-input clarify-native-answer';
+        answer.type=item.isSecret?'password':'text';
+        answer.autocomplete=item.isSecret?'new-password':'off';
+        answer.dataset.questionId=String(item.id);
+        answer.dataset.valueType=String(item.value_type||'string');
+        answer.dataset.required=item.required===false?'false':'true';
+        answer.placeholder=item.required===false?'Optional':'Your answer';
+        const options=Array.isArray(item.options)?item.options:[];
+        if(options.length){
+          const listId=`clarify-options-${String(pending.clarify_id||'native').replace(/[^a-zA-Z0-9_-]/g,'')}-${index}`;
+          const datalist=document.createElement('datalist');
+          datalist.id=listId;
+          options.forEach(option=>{
+            const value=String((option&&option.label)||option||'').trim();
+            if(!value) return;
+            const optionEl=document.createElement('option');
+            optionEl.value=value;
+            if(option&&option.description) optionEl.label=String(option.description);
+            datalist.appendChild(optionEl);
+          });
+          answer.setAttribute('list',listId);
+          row.appendChild(datalist);
+        }
+        answer.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();respondClarify();}};
+        row.appendChild(header);
+        row.appendChild(prompt);
+        row.appendChild(answer);
+        choicesEl.appendChild(row);
+      });
+    }else if (choices.length) {
       choices.forEach((choice, idx) => {
         const btn = document.createElement('button');
         btn.type = 'button';
@@ -8803,6 +8854,7 @@ function showClarifyCard(pending) {
   }
   if (input) {
     if (!sameClarify) input.value = '';
+    input.style.display=nativeQuestions.length?'none':'';
     input.disabled = false;
     input.removeAttribute('readonly');
     input.onkeydown = (e) => {
@@ -8824,8 +8876,11 @@ function showClarifyCard(pending) {
   if (typeof applyLocaleToDOM === "function") applyLocaleToDOM();
   // Move focus to clarify input synchronously (not in setTimeout) and
   // only if the user wasn't mid-type in the composer textarea.
-  if (input && !sameClarify && document.activeElement !== $('msg')) {
-    input.focus({preventScroll: true});
+  const focusTarget=nativeQuestions.length&&choicesEl
+    ?choicesEl.querySelector('.clarify-native-answer')
+    :input;
+  if (focusTarget && !sameClarify && document.activeElement !== $('msg')) {
+    focusTarget.focus({preventScroll: true});
   }
   if (typeof syncTopbar === 'function') syncTopbar();
 }
@@ -8834,8 +8889,30 @@ async function respondClarify(response) {
   const sid = _clarifySessionId || (S.session && S.session.session_id);
   if (!sid) return;
   const input = $("clarifyInput");
-  let value = typeof response === 'string' ? response : (input ? input.value : '');
-  value = String(value || '').trim();
+  const nativeFields=Array.from(document.querySelectorAll('#clarifyChoices .clarify-native-answer'));
+  let nativeAnswers=null;
+  let value='';
+  if(nativeFields.length){
+    nativeAnswers={};
+    const summary=[];
+    for(const field of nativeFields){
+      const answer=String(field.value||'').trim();
+      if(!answer&&field.dataset.required!=='false'){
+        field.focus();
+        return;
+      }
+      if(answer){
+        nativeAnswers[String(field.dataset.questionId||'answer')]=[answer];
+        const row=field.closest('.clarify-native-question');
+        const label=row&&row.querySelector('.clarify-native-header');
+        summary.push(`${label?label.textContent:'Answer'}: ${field.type==='password'?'••••••':answer}`);
+      }
+    }
+    value=summary.join('; ')||'Submitted';
+  }else{
+    value = typeof response === 'string' ? response : (input ? input.value : '');
+    value = String(value || '').trim();
+  }
   if (!value) {
     if (input) input.focus();
     return;
@@ -8847,7 +8924,7 @@ async function respondClarify(response) {
   try {
     const result = await api("/api/clarify/respond", {
       method: "POST",
-      body: JSON.stringify({ session_id: sid, response: value, clarify_id: clarifyId || "" })
+      body: JSON.stringify({ session_id: sid, response: value, clarify_id: clarifyId || "", native_answers:nativeAnswers })
     });
     if (result && result.ok) {
       // Only clear/hide if the visible prompt still matches what was just
@@ -8873,7 +8950,9 @@ async function respondClarify(response) {
     } else {
       // Stale / expired / wrong session — keep the card and draft visible.
       _clarifySetControlsDisabled(false, false);
-      if (input) {
+      if (nativeFields.length) {
+        nativeFields[0].focus();
+      } else if (input) {
         input.value = draft;
         input.focus();
       }
@@ -8926,7 +9005,9 @@ async function respondClarify(response) {
     // Network / other transient errors — keep the card and draft visible so
     // the user can retry once connectivity returns.
     _clarifySetControlsDisabled(false, false);
-    if (input) {
+    if (nativeFields.length) {
+      nativeFields[0].focus();
+    } else if (input) {
       input.value = draft;
       input.focus();
     }

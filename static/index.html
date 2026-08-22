@@ -510,6 +510,21 @@
         </div>
       </div>
     </div>
+    <div class="native-runtime-bar" id="nativeRuntimeBar" hidden>
+      <div class="native-runtime-identity">
+        <span class="native-runtime-dot" aria-hidden="true"></span>
+        <strong>Codex Work</strong>
+        <span class="native-runtime-status" id="nativeRuntimeStatus"></span>
+      </div>
+      <label class="native-workspace-control" for="nativeWorkspaceSelect">
+        <span>On your machine</span>
+        <select id="nativeWorkspaceSelect" onchange="selectNativeWorkspace(this.value)" aria-label="Local Codex workspace"></select>
+      </label>
+      <div class="native-runtime-features-wrap">
+        <button type="button" class="native-runtime-features-btn" id="nativeRuntimeFeaturesBtn" aria-expanded="false" aria-controls="nativeRuntimeFeatures" onclick="toggleNativeRuntimeFeatures(event)">Codex features <span aria-hidden="true">⌄</span></button>
+        <div class="native-runtime-features" id="nativeRuntimeFeatures" role="dialog" aria-label="Native Codex features" hidden></div>
+      </div>
+    </div>
     <div class="messages-shell">
       <button id="jumpToSessionStartBtn" class="session-jump-btn session-jump-btn--start" aria-label="Jump to beginning of session" data-i18n-aria-label="session_jump_start_label" data-i18n-title="session_jump_start_label" onclick="jumpToSessionStart()" style="display:none"><span aria-hidden="true">↑</span><span data-i18n="session_jump_start">Start</span></button>
       <button id="scrollToBottomBtn" class="scroll-to-bottom-btn" style="display:none" onclick="scrollToBottom()" aria-label="Scroll to bottom" data-i18n-aria-label="session_jump_end_label" data-i18n-title="session_jump_end_label"><span aria-hidden="true">↓</span><span class="session-jump-btn__text" data-i18n="session_jump_end">End</span></button>
