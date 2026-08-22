@@ -414,12 +414,13 @@ const initial = snapshot(dropdown);
 // The show-all expander now lives inside a `.model-group-body` wrapper (#4279),
 // so search the whole subtree rather than only direct children.
 const initialShowAllRow = findInTree(dropdown, node => String(node._innerHTML || '').includes('Show all'));
-const searchInput = dropdown.children[1].querySelector('.model-search-input');
+const pickerHeader = dropdown.children[0];
+const searchInput = pickerHeader.children[1].querySelector('.model-search-input');
 searchInput.value = payload.searchTerm || '';
 searchInput._listeners.input();
 const searched = snapshot(dropdown);
 if (initialShowAllRow) initialShowAllRow.onclick({ stopPropagation() {} });
-const searchInputAfterExpand = dropdown.children[1].querySelector('.model-search-input');
+const searchInputAfterExpand = dropdown.children[0].children[1].querySelector('.model-search-input');
 searchInputAfterExpand.value = '';
 searchInputAfterExpand._listeners.input();
 const expanded = snapshot(dropdown);
@@ -807,7 +808,7 @@ initialShowAllRow.onclick({ stopPropagation() {} });
 const expanded = snapshot(dropdown);
 // Now type a search, then clear it, to verify the hiddenByDefault sync
 // keeps the group fully expanded through the search→clear cycle.
-const searchInput = dropdown.children[1].querySelector('.model-search-input');
+const searchInput = dropdown.children[0].children[1].querySelector('.model-search-input');
 searchInput.value = payload.searchTerm;
 searchInput._listeners.input();
 const searched = snapshot(dropdown);

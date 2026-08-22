@@ -70,6 +70,15 @@ def test_model_badges_use_theme_tokens_in_light_and_dark_modes():
         assert token in rule
 
 
+def test_picker_visual_hierarchy_keeps_search_and_selection_easy_to_find():
+    assert ".model-picker-header{position:sticky" in CSS
+    assert "scrollbar-gutter:stable" in CSS
+    assert ".model-group.collapsible:hover" in CSS
+    active_start = CSS.index(".model-opt.active{")
+    active_rule = CSS[active_start : CSS.index("}", active_start)]
+    assert "box-shadow:inset 3px 0 0" in active_rule
+
+
 def test_escape_returns_focus_to_the_visible_mobile_model_trigger():
     assert "mobilePanel.classList.contains('open')" in UI
     assert "?'composerMobileModelAction'" in UI

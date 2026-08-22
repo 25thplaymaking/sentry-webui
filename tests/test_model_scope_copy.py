@@ -13,11 +13,16 @@ def test_composer_model_dropdown_has_scope_advisory():
     style = read("static/style.css")
 
     assert "model-scope-note" in ui
+    assert "model-scope-note-lead" in ui
+    assert "model-scope-note-detail" in ui
+    assert "_scopeNote.setAttribute('role','note')" in ui
     assert "model_scope_advisory" in ui
     assert "Applies to this conversation from your next message." in ui
-    assert ui.index("dd.appendChild(_scopeNote);") < ui.index("dd.appendChild(_searchRow);")
+    assert "_pickerHeader.appendChild(_scopeNote);" in ui
+    assert "_pickerHeader.appendChild(_searchRow);" in ui
+    assert "dd.appendChild(_pickerHeader);" in ui
     assert ".model-scope-note" in style
-    assert "position:sticky" in style
+    assert ".model-picker-header{position:sticky" in style
 
 
 def test_model_selection_toast_describes_conversation_scope():

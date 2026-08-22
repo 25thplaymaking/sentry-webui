@@ -4419,12 +4419,24 @@ function renderModelDropdown(){
   // Create search input FIRST before filterModels definition
   const _scopeNote=document.createElement('div');
   _scopeNote.className='model-scope-note';
-  _scopeNote.textContent=opts.scopeNoteText||window._modelScopeNote||(t('model_scope_advisory')||'Applies to this conversation from your next message.');
+  _scopeNote.setAttribute('role','note');
+  const _scopeCopy=String(opts.scopeNoteText||window._modelScopeNote||(t('model_scope_advisory')||'Applies to this conversation from your next message.'));
+  // A linked-account advisory often contains both a short scope statement and
+  // a longer runtime boundary. Give those two jobs distinct visual hierarchy
+  // without introducing a Sentry-only untranslated heading.
+  const _scopeParts=_scopeCopy.match(/^(.+?[.!?。！？])(?:\s+|$)(.*)$/);
+  const _scopeLead=_scopeParts?_scopeParts[1]:_scopeCopy;
+  const _scopeDetail=_scopeParts?_scopeParts[2]:'';
+  _scopeNote.innerHTML=`<span class="model-scope-note-lead">${esc(_scopeLead)}</span>${_scopeDetail?`<span class="model-scope-note-detail">${esc(_scopeDetail)}</span>`:''}`;
   const _searchRow=document.createElement('div');
   _searchRow.className='model-search-row';
   _searchRow.innerHTML=`<input class="model-search-input" type="text" aria-label="Search available models" placeholder="${esc(t('model_search_placeholder')||'Search models…')}" spellcheck="false" autocomplete="off"><button class="model-search-clear" type="button" title="Clear search" aria-label="Clear model search">${li('x',10)}</button>`;
   const _si=_searchRow.querySelector('.model-search-input');
   const _sc=_searchRow.querySelector('.model-search-clear');
+  const _pickerHeader=document.createElement('div');
+  _pickerHeader.className='model-picker-header';
+  _pickerHeader.appendChild(_scopeNote);
+  _pickerHeader.appendChild(_searchRow);
   // Create custom model section elements
   const _custSep=document.createElement('div');
   _custSep.className='model-group model-custom-sep';
@@ -4727,8 +4739,7 @@ function renderModelDropdown(){
       && !configuredSemanticKeys.has(`${_configuredProviderKey(m)}::${_configuredModelKey(m)}`)
     ).length;
     dd.innerHTML='';
-    dd.appendChild(_scopeNote);
-    dd.appendChild(_searchRow);
+    dd.appendChild(_pickerHeader);
     if(!window._modelCatalogRestricted){
       dd.appendChild(_custSep);
       dd.appendChild(_custRow);
