@@ -3872,7 +3872,15 @@ window._mirrorSpeechSettingsFromServer=_mirrorSpeechSettingsFromServer;
       }
       S._bootReady=true;
       syncTopbar();syncWorkspacePanelState();await renderSessionList();if(typeof startGatewaySSE==='function')startGatewaySSE();await checkInflightOnBoot(saved);await _finalizeComposerPrefillOnBoot(prefillIntent);return;}
-    catch(e){localStorage.removeItem('hermes-webui-session');}
+    catch(e){
+      localStorage.removeItem('hermes-webui-session');
+      // loadSession paints a temporary transcript placeholder before its
+      // metadata request. A missing saved session rethrows so boot can fall
+      // through to the fresh-chat state; clear that placeholder here as part
+      // of the same fallback so it cannot remain visible over the empty state.
+      const _failedRestoreMessages=$('msgInner');
+      if(_failedRestoreMessages) _failedRestoreMessages.innerHTML='';
+    }
   }
   // no saved session - show empty state, wait for user to hit +
   S._bootReady=true;

@@ -14,7 +14,9 @@ These tests lock in:
      composer when the active session vanished (#2798, #2782).
   3. Clicking a different dead row restores the still-current conversation
      instead of replacing it with a permanent error pane.
-  4. The server 404s a deleted *WebUI* session on ``GET /api/session`` instead
+  4. A boot-time stale-session fallback also removes the temporary
+     "Loading conversation..." placeholder before showing the fresh composer.
+  5. The server 404s a deleted *WebUI* session on ``GET /api/session`` instead
      of synthesising a read-only CLI stub, so ``GET`` and the ``POST`` write
      paths agree on whether a session exists and the client can self-heal
      (#2782). A genuine CLI-origin session still returns 200 after its sidecar
@@ -37,6 +39,7 @@ REPO = Path(__file__).parent.parent
 WORKSPACE_JS = (REPO / "static" / "workspace.js").read_text(encoding="utf-8")
 SESSIONS_JS = (REPO / "static" / "sessions.js").read_text(encoding="utf-8")
 MESSAGES_JS = (REPO / "static" / "messages.js").read_text(encoding="utf-8")
+BOOT_JS = (REPO / "static" / "boot.js").read_text(encoding="utf-8")
 NODE = shutil.which("node")
 
 
@@ -76,6 +79,16 @@ def _send_catch_block() -> str:
     end = MESSAGES_JS.find("const conflictActiveStream", catch_idx)
     assert end > catch_idx, "send() catch conflictActiveStream marker not found"
     return MESSAGES_JS[catch_idx:end]
+
+
+def _boot_saved_session_catch_block() -> str:
+    start = BOOT_JS.find("await loadSession(saved, {preserveActiveInput:true})")
+    assert start > 0, "boot saved-session restore not found"
+    catch_idx = BOOT_JS.find("catch(e){", start)
+    assert catch_idx > start, "boot saved-session restore catch not found"
+    end = BOOT_JS.find("// no saved session", catch_idx)
+    assert end > catch_idx, "boot saved-session fallback terminator not found"
+    return BOOT_JS[catch_idx:end]
 
 
 def test_api_http_errors_preserve_response_status():
@@ -183,6 +196,18 @@ def test_different_dead_session_404_restores_current_conversation():
     assert "Session not available in web UI." not in arm, (
         "a 404 must no longer replace the transcript with a permanent error pane"
     )
+
+
+def test_boot_stale_session_clears_loading_placeholder():
+    """The saved-session 404 fallback must not leave its loading row visible
+    over the fresh composer after loadSession rethrows to boot."""
+    block = _boot_saved_session_catch_block()
+    clear_saved_idx = block.find("localStorage.removeItem('hermes-webui-session')")
+    find_placeholder_idx = block.find("$('msgInner')")
+    clear_placeholder_idx = block.find("innerHTML=''", find_placeholder_idx)
+    assert clear_saved_idx >= 0
+    assert find_placeholder_idx > clear_saved_idx
+    assert clear_placeholder_idx > find_placeholder_idx
 
 
 @pytest.mark.skipif(NODE is None, reason="node is required for session recovery behavior")
