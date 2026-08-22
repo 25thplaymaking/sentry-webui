@@ -592,6 +592,22 @@ def _translate_sentry_event(payload) -> list[tuple[str, dict]]:
         native_method = str(evidence.get("native_method") or "")
         native_frame = evidence.get("native")
         native_frame = native_frame if isinstance(native_frame, dict) else {}
+        if native_method == "turn/diff/updated":
+            params = native_frame.get("params")
+            params = params if isinstance(params, dict) else {}
+            diff = ""
+            for key in ("diff", "unifiedDiff", "unified_diff", "patch"):
+                candidate = params.get(key)
+                if isinstance(candidate, str) and candidate:
+                    diff = candidate
+                    break
+            return [("sentry_diff", {
+                "session_id": str(payload.get("sessionId") or ""),
+                "diff": diff[:160000],
+                "truncated": len(diff) > 160000,
+                "source": "codex-live",
+                "ts": time.time(),
+            })]
         if native_method == "turn/plan/updated":
             params = native_frame.get("params")
             params = params if isinstance(params, dict) else {}
@@ -806,6 +822,7 @@ def _run_sentry_turn_streaming(
     experience="work",
     workspace_id=None,
     native_options=None,
+    target=None,
     images=None,
 ):
     """Bridge one WebUI turn through the Sentry Gateway ``/api/chat/turn``.
@@ -841,6 +858,8 @@ def _run_sentry_turn_streaming(
         body["workspace_id"] = str(workspace_id)
     if native_options:
         body["native_options"] = dict(native_options)
+    if target:
+        body["target"] = dict(target)
     if images:
         body["images"] = list(images)
     req = urllib.request.Request(
@@ -1723,6 +1742,7 @@ def _run_gateway_chat_streaming(
                     experience=getattr(s, "experience", "work"),
                     workspace_id=getattr(s, "native_workspace_id", None),
                     native_options=getattr(s, "native_runtime_options", None),
+                    target=getattr(s, "sentry_target", None),
                     images=sentry_images,
                 )
             except Exception as exc:

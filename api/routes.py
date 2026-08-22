@@ -13165,6 +13165,36 @@ def handle_get(handler, parsed) -> bool:
     if parsed.path.startswith("/api/") and not _guard_request_session_visibility(handler, parsed, method="GET"):
         return True
 
+    # ── Sentry linked sessions / repository / target integrations (GET) ──
+    if parsed.path in {
+        "/api/sentry/integrations/status",
+        "/api/sentry/integrations/action",
+    }:
+        from api.gateway_chat import _gateway_dialect, sentry_access_token_from_handler
+        if _gateway_dialect() != "sentry":
+            return j(handler, {"error": "Not found"}, status=404)
+        token = sentry_access_token_from_handler(handler)
+        if not token:
+            return _sentry_no_identity(handler)
+        from api.sentry_gateway_client import SentryGatewayError, get_json
+        try:
+            if parsed.path.endswith("/status"):
+                return j(handler, get_json("/api/integrations/status", token) or {})
+            query = parse_qs(parsed.query or "")
+            work_order_id = str((query.get("work_order_id") or [""])[0]).strip()
+            after = str((query.get("after") or ["0"])[0]).strip()
+            if not work_order_id:
+                return bad(handler, "work_order_id is required", 400)
+            if not after.isdigit():
+                return bad(handler, "after must be a non-negative integer", 400)
+            path = (
+                f"/api/integrations/actions/{quote(work_order_id, safe='')}"
+                f"?after={quote(after, safe='')}"
+            )
+            return j(handler, get_json(path, token, timeout=30.0) or {})
+        except SentryGatewayError as exc:
+            return bad(handler, str(exc), exc.status or 502)
+
     # ── Insights / knowledge status ──
     if parsed.path == "/api/insights":
         # _handle_insights reads LOCAL WebUI session data. Under the sentry
@@ -15273,6 +15303,52 @@ def _validate_native_runtime_options(value):
     return result
 
 
+def _validate_sentry_target(value):
+    """Validate persisted target shape; the Gateway resolves live authority."""
+    if value is None or value == {}:
+        return {}
+    if not isinstance(value, dict):
+        raise ValueError("sentry_target must be an object or null")
+    kind = str(value.get("kind") or "").strip()
+    if kind == "workspace":
+        allowed = {"kind", "node_id", "workspace_id", "node_name"}
+        if set(value) - allowed:
+            raise ValueError("sentry_target contains unsupported workspace fields")
+        node_id = str(value.get("node_id") or "").strip()
+        workspace_id = str(value.get("workspace_id") or "").strip()
+        if not node_id or len(node_id) > 100 or not workspace_id or len(workspace_id) > 200:
+            raise ValueError("sentry_target workspace is incomplete")
+        try:
+            node_id = str(uuid.UUID(node_id))
+        except (ValueError, TypeError, AttributeError):
+            raise ValueError("sentry_target node_id must be a UUID") from None
+        if not re.fullmatch(r"[A-Za-z0-9_.-]+", workspace_id):
+            raise ValueError("sentry_target workspace_id must be a named workspace")
+        return {
+            "kind": "workspace",
+            "node_id": node_id,
+            "workspace_id": workspace_id,
+            "node_name": str(value.get("node_name") or "")[:100],
+        }
+    if kind == "service":
+        allowed = {"kind", "service_id", "name", "status"}
+        if set(value) - allowed:
+            raise ValueError("sentry_target contains unsupported service fields")
+        service_id = str(value.get("service_id") or "").strip()
+        name = str(value.get("name") or "").strip()
+        if not service_id or len(service_id) > 200 or not name or len(name) > 200:
+            raise ValueError("sentry_target service is incomplete")
+        if not re.fullmatch(r"[A-Za-z0-9_.:-]+", service_id):
+            raise ValueError("sentry_target service_id is invalid")
+        return {
+            "kind": "service",
+            "service_id": service_id,
+            "name": name,
+            "status": str(value.get("status") or "")[:80],
+        }
+    raise ValueError("sentry_target kind must be workspace or service")
+
+
 def _resolve_new_session_workspace(body, visible_prev_session_id):
     """Resolve a new-session workspace, recovering only verified inheritance."""
     candidate = body.get("workspace")
@@ -15431,6 +15507,40 @@ def handle_post(handler, parsed) -> bool:
         if diag:
             diag.finish()
         return True
+
+    # ── Sentry linked integration actions (POST) ──
+    if parsed.path in {
+        "/api/sentry/integrations/action",
+        "/api/sentry/integrations/cancel",
+    }:
+        from api.gateway_chat import _gateway_dialect, sentry_access_token_from_handler
+        if _gateway_dialect() != "sentry":
+            return j(handler, {"error": "Not found"}, status=404)
+        token = sentry_access_token_from_handler(handler)
+        if not token:
+            return _sentry_no_identity(handler)
+        from api.sentry_gateway_client import SentryGatewayError, post_json
+        try:
+            if parsed.path.endswith("/cancel"):
+                work_order_id = str(body.get("work_order_id") or "").strip()
+                if not work_order_id:
+                    return bad(handler, "work_order_id is required", 400)
+                result = post_json(
+                    f"/api/integrations/actions/{quote(work_order_id, safe='')}/cancel",
+                    token,
+                    {},
+                    timeout=20.0,
+                )
+            else:
+                result = post_json(
+                    "/api/integrations/actions",
+                    token,
+                    body,
+                    timeout=20.0,
+                )
+            return j(handler, result or {})
+        except SentryGatewayError as exc:
+            return bad(handler, str(exc), exc.status or 502)
 
     if parsed.path == "/api/escape/authorize":
         return _handle_escape_authorize(handler, parsed, body)
@@ -15699,6 +15809,7 @@ def handle_post(handler, parsed) -> bool:
             native_runtime_options = _validate_native_runtime_options(
                 body.get("native_runtime_options")
             )
+            sentry_target = _validate_sentry_target(body.get("sentry_target"))
         except ValueError as e:
             return bad(handler, str(e), status=400)
         workspace_prev_session_id = body.get("prev_session_id")
@@ -15827,6 +15938,7 @@ def handle_post(handler, parsed) -> bool:
             experience=experience,
             native_workspace_id=native_workspace_id,
             native_runtime_options=native_runtime_options,
+            sentry_target=sentry_target,
         )
         if worktree_info:
             publish_session_list_changed(
@@ -16345,6 +16457,9 @@ def handle_post(handler, parsed) -> bool:
         existing_native_runtime_options = getattr(s, "native_runtime_options", {})
         if not isinstance(existing_native_runtime_options, dict):
             existing_native_runtime_options = {}
+        existing_sentry_target = getattr(s, "sentry_target", {})
+        if not isinstance(existing_sentry_target, dict):
+            existing_sentry_target = {}
         try:
             native_workspace_id = _validate_native_workspace_id(
                 body.get("native_workspace_id", existing_native_workspace_id)
@@ -16354,6 +16469,9 @@ def handle_post(handler, parsed) -> bool:
                     "native_runtime_options",
                     existing_native_runtime_options,
                 )
+            )
+            sentry_target = _validate_sentry_target(
+                body.get("sentry_target", existing_sentry_target)
             )
         except ValueError as e:
             return bad(handler, str(e), status=400)
@@ -16365,6 +16483,7 @@ def handle_post(handler, parsed) -> bool:
             s.workspace = new_ws
             s.native_workspace_id = native_workspace_id
             s.native_runtime_options = native_runtime_options
+            s.sentry_target = sentry_target
             if "model" in body or "model_provider" in body:
                 model, provider = _session_model_state_from_request(
                     body.get("model", s.model),

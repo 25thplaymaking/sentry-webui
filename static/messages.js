@@ -5961,6 +5961,14 @@ function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
       if(typeof scheduleTodosRefresh==='function') scheduleTodosRefresh();
     });
 
+    source.addEventListener('sentry_diff',e=>{
+      let d={};
+      try{d=JSON.parse(e.data||'{}');}catch(_){return;}
+      if(d.session_id&&d.session_id!==activeSid) return;
+      if(!S.session||S.session.session_id!==activeSid) return;
+      if(typeof window.updateSentryLiveDiff==='function') window.updateSentryLiveDiff(d);
+    });
+
     source.addEventListener('approval',e=>{
       const d=JSON.parse(e.data);
       _applyToAnchor('approval',d,e);
@@ -6916,7 +6924,7 @@ function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
       })();
     });
 
-    for(const _runJournalEventName of ['token','interim_assistant','reasoning','tool','tool_complete','todo_state','approval','clarify','state_saved','title','title_status','context_status','goal','goal_continue','done','stream_end','pending_steer_leftover','compressing','compressed','metering','apperror','warning','error','cancel']){
+    for(const _runJournalEventName of ['token','interim_assistant','reasoning','tool','tool_complete','todo_state','sentry_diff','approval','clarify','state_saved','title','title_status','context_status','goal','goal_continue','done','stream_end','pending_steer_leftover','compressing','compressed','metering','apperror','warning','error','cancel']){
       source.addEventListener(_runJournalEventName,_rememberRunJournalCursor);
     }
   }

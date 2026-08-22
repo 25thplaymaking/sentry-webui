@@ -1522,6 +1522,19 @@ async function newSession(flash, options={}){
     if(nativeModelForNew&&requestedNativeOptions&&typeof requestedNativeOptions==='object'){
       reqBody.native_runtime_options={...requestedNativeOptions};
     }
+    const currentSentryTarget=S.session&&S.session.sentry_target&&typeof S.session.sentry_target==='object'
+      &&Object.keys(S.session.sentry_target).length?S.session.sentry_target:null;
+    let requestedSentryTarget=(options&&Object.prototype.hasOwnProperty.call(options,'sentry_target'))
+      ?options.sentry_target
+      :(currentSentryTarget||S._pendingSentryTarget||null);
+    if(nativeModelForNew&&requestedSentryTarget&&requestedSentryTarget.kind!=='workspace'){
+      requestedSentryTarget=(typeof window.sentryWorkspaceTargetForId==='function')
+        ?window.sentryWorkspaceTargetForId(requestedNativeWorkspace)
+        :null;
+    }
+    if(requestedSentryTarget&&typeof requestedSentryTarget==='object'){
+      reqBody.sentry_target={...requestedSentryTarget};
+    }
     const data=await api('/api/session/new',{method:'POST',body:JSON.stringify(reqBody)});
     if(consumedExplicitModelOverride&&typeof _clearEmptyComposerModelOverride==='function'){
       _clearEmptyComposerModelOverride();
@@ -1531,6 +1544,7 @@ async function newSession(flash, options={}){
     S._pendingExperience=(data.session&&data.session.experience)||reqBody.experience;
     S._pendingNativeWorkspaceId=(data.session&&data.session.native_workspace_id)||reqBody.native_workspace_id||null;
     S._pendingNativeRuntimeOptions=(data.session&&data.session.native_runtime_options)||reqBody.native_runtime_options||null;
+    S._pendingSentryTarget=(data.session&&data.session.sentry_target)||reqBody.sentry_target||null;
     if(_sessionSourceFilter==='cli') _sessionSourceFilter='webui';
     if(typeof _hydrateTodosFromSession==='function') _hydrateTodosFromSession(S.session);
     S.lastUsage={...(data.session.last_usage||{})};

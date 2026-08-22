@@ -282,7 +282,8 @@ function syncWorkspacePanelState(){
 }
 
 function openWorkspacePanel(mode='browse'){
-  if(mode==='browse'&&!S.session&&!_hasWorkspacePreviewVisible()&&!S._profileDefaultWorkspace)return;
+  const isSentryInspector=!!(document.body&&document.body.dataset.sentryProduct==='true'&&document.body.dataset.sentryExperience==='work');
+  if(mode==='browse'&&!S.session&&!_hasWorkspacePreviewVisible()&&!S._profileDefaultWorkspace&&!isSentryInspector)return;
   if(mode==='preview'&&_workspacePanelMode==='browse'){
     syncWorkspacePanelUI();
     return;
@@ -359,7 +360,8 @@ function syncWorkspacePanelUI(){
   const mobileOpen=panel.classList.contains('mobile-open');
   const isCompact=_isCompactWorkspaceViewport();
   const isOpen=isCompact?mobileOpen:desktopOpen;
-  const canBrowse=!!S.session||_hasWorkspacePreviewVisible()||!!(S._profileDefaultWorkspace);
+  const canBrowse=!!S.session||_hasWorkspacePreviewVisible()||!!(S._profileDefaultWorkspace)
+    ||!!(document.body&&document.body.dataset.sentryProduct==='true'&&document.body.dataset.sentryExperience==='work');
   const hasPreview=_hasWorkspacePreviewVisible();
   if(toggleBtn){
     toggleBtn.classList.toggle('active',isOpen);
@@ -376,6 +378,15 @@ function syncWorkspacePanelUI(){
     _setButtonTooltip(edgeToggleBtn, label);
     edgeToggleBtn.setAttribute('aria-label', label);
     edgeToggleBtn.disabled=!canBrowse;
+  }
+  const sentryInspectorToggle=$('sentryInspectorToggle');
+  if(sentryInspectorToggle){
+    sentryInspectorToggle.classList.toggle('active',isOpen);
+    sentryInspectorToggle.setAttribute('aria-expanded',isOpen?'true':'false');
+    const label=isOpen?'Hide changes, GitHub, and integrations':'Show changes, GitHub, and integrations';
+    _setButtonTooltip(sentryInspectorToggle,label);
+    sentryInspectorToggle.setAttribute('aria-label',label);
+    sentryInspectorToggle.disabled=!canBrowse;
   }
   if(collapseBtn){
     _setButtonTooltip(collapseBtn, isCompact?_uiText('workspace_panel_close','Close workspace panel'):_uiText('workspace_panel_hide','Hide workspace panel'));
@@ -2238,6 +2249,21 @@ $('btnClearPreview').onclick=handleWorkspaceClose;
 // workspacePath click handler removed -- use topbar workspace chip dropdown instead
 function _applySessionContextMetadataUpdate(data){
   if(!S.session||!data||!data.session)return;
+  if(Object.prototype.hasOwnProperty.call(data.session,'experience')) S.session.experience=data.session.experience;
+  if(Object.prototype.hasOwnProperty.call(data.session,'native_workspace_id')){
+    S.session.native_workspace_id=data.session.native_workspace_id||null;
+    S._pendingNativeWorkspaceId=S.session.native_workspace_id;
+  }
+  if(Object.prototype.hasOwnProperty.call(data.session,'native_runtime_options')){
+    S.session.native_runtime_options=(data.session.native_runtime_options&&typeof data.session.native_runtime_options==='object')
+      ?{...data.session.native_runtime_options}:{};
+    S._pendingNativeRuntimeOptions={...S.session.native_runtime_options};
+  }
+  if(Object.prototype.hasOwnProperty.call(data.session,'sentry_target')){
+    S.session.sentry_target=(data.session.sentry_target&&typeof data.session.sentry_target==='object')
+      ?{...data.session.sentry_target}:{};
+    S._pendingSentryTarget=Object.keys(S.session.sentry_target).length?{...S.session.sentry_target}:null;
+  }
   S.session.context_length=data.session.context_length||0;
   S.session.threshold_tokens=data.session.threshold_tokens||0;
   S.session.last_prompt_tokens=data.session.last_prompt_tokens||0;
@@ -2270,6 +2296,14 @@ $('modelSelect').onchange=async()=>{
   const nativeRuntimeOptions=(nativeRuntime&&typeof _currentNativeRuntimeOptions==='function')
     ?_currentNativeRuntimeOptions(nativeRuntime)
     :null;
+  let sentryTarget=(S.session&&S.session.sentry_target)||S._pendingSentryTarget||null;
+  if(nativeRuntimeId&&(!sentryTarget||sentryTarget.kind!=='workspace'||String(sentryTarget.workspace_id)!==String(nativeWorkspaceId||''))){
+    sentryTarget=(typeof window.sentryWorkspaceTargetForId==='function')
+      ?window.sentryWorkspaceTargetForId(nativeWorkspaceId)
+      :null;
+    S._pendingSentryTarget=sentryTarget?{...sentryTarget}:null;
+    if(S.session) S.session.sentry_target=sentryTarget?{...sentryTarget}:{};
+  }
   if(typeof clearProfileTransitionReasoningContext==='function') clearProfileTransitionReasoningContext();
   if(typeof closeModelDropdown==='function') closeModelDropdown();
   if(typeof _writePersistedModelState==='function') _writePersistedModelState(modelState.model,modelState.model_provider);
@@ -2330,6 +2364,7 @@ $('modelSelect').onchange=async()=>{
     model_provider:modelState.model_provider||null,
     native_workspace_id:nativeRuntimeId?(nativeWorkspaceId||null):(S.session.native_workspace_id||null),
     native_runtime_options:nativeRuntimeId?(nativeRuntimeOptions||{}):null,
+    sentry_target:sentryTarget||{},
   })});
   // NOTE: do NOT clear the pending explicit-pick marker here. It must survive until
   // the NEXT send() consumes it, otherwise the normal "pick → session-update → send"

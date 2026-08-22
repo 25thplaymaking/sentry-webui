@@ -11535,6 +11535,7 @@ function syncNativeRuntimeBar(){
   if(!runtimeId){
     wrap.hidden=true;
     _setNativeRuntimeMenuOpen(false);
+    if(typeof window.syncSentryIntegrationSurface==='function') window.syncSentryIntegrationSurface();
     return;
   }
   const runtime=_nativeRuntimeById(runtimeId)||{id:runtimeId,available:false,workspaces:[],features:[],inventory:{},reason:'This native runtime is not connected.'};
@@ -11628,6 +11629,7 @@ function syncNativeRuntimeBar(){
       ?'Ask Codex to review the uncommitted changes…'
       :(options.collaboration_mode==='plan'?'Ask Codex to plan the work…':'Ask Codex to work…');
   }
+  if(typeof window.syncSentryIntegrationSurface==='function') window.syncSentryIntegrationSurface();
 }
 async function toggleNativeRuntimeQuickOption(key,activeValue,inactiveValue){
   const runtime=_nativeRuntimeById(typeof _selectedNativeRuntimeId==='function'?_selectedNativeRuntimeId():'');
@@ -11730,6 +11732,7 @@ function syncExperienceBar(){
     main.removeAttribute('data-experience');
     if(document.body) document.body.removeAttribute('data-sentry-experience');
     if(typeof syncNativeRuntimeBar==='function') syncNativeRuntimeBar();
+    if(typeof window.syncSentryIntegrationSurface==='function') window.syncSentryIntegrationSurface();
     return;
   }
   const mode=_currentExperience();
@@ -11777,6 +11780,7 @@ function syncExperienceBar(){
     });
   }
   if(typeof syncNativeRuntimeBar==='function') syncNativeRuntimeBar();
+  if(typeof window.syncSentryIntegrationSurface==='function') window.syncSentryIntegrationSurface();
 }
 async function selectExperience(value){
   const next=_normalizeExperience(value);

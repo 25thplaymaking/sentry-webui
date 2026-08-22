@@ -231,6 +231,16 @@
         </div>
       </div>
       <div class="session-search sidebar-search"><div class="session-search-field"><svg class="sidebar-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg><input id="sessionSearch" type="search" placeholder="Filter conversations..." data-i18n-placeholder="filter_conversations" oninput="filterSessions()" autocomplete="off" data-1p-ignore data-lpignore="true" data-bwignore="true" data-form-type="other"><button type="button" id="sessionSearchClear" class="session-search-clear has-tooltip has-tooltip--bottom-right" aria-label="Clear conversation filter" data-tooltip="Clear conversation filter" onclick="clearSessionSearch()" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div></div>
+      <section class="linked-session-hub" id="linkedSessionHub" aria-label="Linked provider sessions" hidden>
+        <div class="linked-session-hub-head">
+          <span>Linked sessions</span>
+          <button type="button" id="linkedSessionsRefresh" onclick="refreshSentryIntegrations({sync:true})" aria-label="Sync linked sessions" title="Sync linked sessions">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.5 9a9 9 0 0 1 14.9-3.4L23 10M1 14l4.6 4.4A9 9 0 0 0 20.5 15"/></svg>
+          </button>
+        </div>
+        <div id="linkedSessionGroups" class="linked-session-groups"></div>
+        <div id="linkedSessionBoundary" class="linked-session-boundary"></div>
+      </section>
       <div class="session-list" id="sessionList"></div>
     </div>
     <!-- Tasks (cron) panel -->
@@ -510,6 +520,25 @@
         </div>
       </div>
     </div>
+    <section class="provider-session-view" id="providerSessionView" hidden aria-label="Linked provider session">
+      <header class="provider-session-header">
+        <button type="button" class="provider-session-back" onclick="closeLinkedProviderSession()" aria-label="Return to Sentry conversations">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg>
+        </button>
+        <div class="provider-session-heading">
+          <div class="provider-session-kicker" id="providerSessionKicker">Linked session</div>
+          <h2 id="providerSessionTitle">Provider session</h2>
+          <div class="provider-session-meta" id="providerSessionMeta"></div>
+        </div>
+        <div class="provider-session-actions">
+          <span class="provider-session-live" id="providerSessionLiveState">Read only</span>
+          <button type="button" id="providerSessionWatchBtn" onclick="toggleLinkedProviderWatch()">Watch live</button>
+          <button type="button" onclick="openCurrentWorkspaceInIde()">Open in IDE</button>
+        </div>
+      </header>
+      <div class="provider-session-notice">A live, read-only view from the provider's local installation. Continue the work in its original client or start a new Sentry task.</div>
+      <div class="provider-session-transcript" id="providerSessionTranscript" aria-live="polite"></div>
+    </section>
     <div class="messages-shell">
       <button id="jumpToSessionStartBtn" class="session-jump-btn session-jump-btn--start" aria-label="Jump to beginning of session" data-i18n-aria-label="session_jump_start_label" data-i18n-title="session_jump_start_label" onclick="jumpToSessionStart()" style="display:none"><span aria-hidden="true">↑</span><span data-i18n="session_jump_start">Start</span></button>
       <button id="scrollToBottomBtn" class="scroll-to-bottom-btn" style="display:none" onclick="scrollToBottom()" aria-label="Scroll to bottom" data-i18n-aria-label="session_jump_end_label" data-i18n-title="session_jump_end_label"><span aria-hidden="true">↓</span><span class="session-jump-btn__text" data-i18n="session_jump_end">End</span></button>
@@ -786,6 +815,21 @@
                   <span class="composer-workspace-label" id="composerWorkspaceLabel"></span>
                   <span class="composer-workspace-chevron" aria-hidden="true"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></span>
                 </button>
+              </div>
+            </div>
+            <div class="sentry-target-wrap" id="sentryTargetWrap" hidden>
+              <button class="sentry-target-chip" id="sentryTargetChip" type="button" onclick="toggleSentryTargetMenu(event)" aria-haspopup="dialog" aria-expanded="false" aria-controls="sentryTargetMenu" title="Choose where Hermes should work">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 10c0 5-8 12-8 12S4 15 4 10a8 8 0 1 1 16 0Z"/><circle cx="12" cy="10" r="2.5"/></svg>
+                <span id="sentryTargetLabel">No target</span>
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
+              </button>
+              <button class="sentry-inspector-trigger" id="sentryInspectorToggle" type="button" onclick="toggleWorkspacePanel()" title="Show changes, GitHub, and integrations" aria-label="Show changes, GitHub, and integrations" aria-controls="sentryInspector" aria-expanded="false">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h5"/><path d="M15 4h5a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-5"/><path d="M12 2v20"/></svg>
+              </button>
+              <div class="sentry-target-menu" id="sentryTargetMenu" role="dialog" aria-label="Hermes target" hidden>
+                <div class="sentry-target-menu-head"><strong>Point Hermes at</strong><span>One explicit location for this conversation</span></div>
+                <button type="button" class="sentry-target-none" onclick="selectSentryTarget(null)">No target <span>General assistant chat</span></button>
+                <div id="sentryTargetOptions"></div>
               </div>
             </div>
             <button class="icon-btn composer-mobile-config-btn" id="composerMobileConfigBtn" type="button" onclick="toggleMobileComposerConfig()" title="Workspace, model, quota, reasoning, and context settings" aria-label="Workspace, model, quota, reasoning, and context settings" aria-haspopup="true" aria-expanded="false" aria-controls="composerMobileConfigPanel">
@@ -1824,6 +1868,30 @@
   </button>
   <aside class="rightpanel">
     <div class="resize-handle" id="rightpanelResize"></div>
+    <section class="sentry-inspector" id="sentryInspector" hidden aria-label="Work inspector">
+      <header class="sentry-inspector-header">
+        <div><span class="sentry-inspector-kicker">Current target</span><strong id="sentryInspectorTarget">No workspace selected</strong></div>
+        <button type="button" class="sentry-inspector-close" onclick="toggleWorkspacePanel(false)" aria-label="Close inspector"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg></button>
+      </header>
+      <div class="sentry-inspector-tabs" role="tablist" aria-label="Work details">
+        <button type="button" class="active" data-sentry-inspector-tab="changes" onclick="selectSentryInspectorTab('changes')" role="tab" aria-selected="true">Changes <span id="sentryChangesCount">0</span></button>
+        <button type="button" data-sentry-inspector-tab="github" onclick="selectSentryInspectorTab('github')" role="tab" aria-selected="false">GitHub</button>
+        <button type="button" data-sentry-inspector-tab="integrations" onclick="selectSentryInspectorTab('integrations')" role="tab" aria-selected="false">Integrations</button>
+      </div>
+      <div class="sentry-inspector-body">
+        <section data-sentry-inspector-panel="changes">
+          <div class="sentry-inspector-toolbar"><span id="sentryDiffBranch">Workspace diff</span><button type="button" onclick="inspectCurrentWorkspace()">Refresh</button></div>
+          <div class="sentry-diff-empty" id="sentryDiffEmpty">Choose a linked workspace to load its real Git diff.</div>
+          <pre class="sentry-diff" id="sentryDiff" hidden aria-label="Unified workspace diff"></pre>
+        </section>
+        <section data-sentry-inspector-panel="github" hidden>
+          <div id="sentryGithubContent" class="sentry-integration-content"></div>
+        </section>
+        <section data-sentry-inspector-panel="integrations" hidden>
+          <div id="sentryIntegrationsContent" class="sentry-integration-content"></div>
+        </section>
+      </div>
+    </section>
     <div class="panel-header">
       <div class="workspace-panel-title-group"><span id="workspacePanelHeading" class="workspace-panel-heading" title="Workspace">Workspace</span><span id="workspaceHiddenIndicator" class="workspace-hidden-indicator" data-i18n-title="workspace_hidden_files_visible_title" title="Hidden files are visible — click for options" hidden onclick="toggleWorkspacePrefsMenu(event)"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg><span data-i18n="workspace_hidden_files_visible">hidden visible</span></span></div>
       <span class="git-badge" id="gitBadge" style="display:none"></span>
@@ -1921,6 +1989,7 @@
 <script src="static/sessions.js?v=__WEBUI_VERSION__" defer></script>
 <script src="static/commands.js?v=__WEBUI_VERSION__" defer></script>
 <script src="static/messages.js?v=__WEBUI_VERSION__" defer></script>
+<script src="static/sentry_integrations.js?v=__WEBUI_VERSION__" defer></script>
 <script src="static/extension_settings.js?v=__WEBUI_VERSION__" defer></script>
 <script src="static/agent_admin.js?v=__WEBUI_VERSION__" defer></script>
 <script src="static/panels.js?v=__WEBUI_VERSION__" defer></script>
