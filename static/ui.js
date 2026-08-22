@@ -5033,6 +5033,8 @@ async function selectModelFromDropdown(value){
 async function toggleModelDropdown(){
   const dd=$('composerModelDropdown');
   const chip=$('composerModelChip');
+  const mobileAction=$('composerMobileModelAction');
+  const mobilePanel=$('composerMobileConfigPanel');
   const sel=$('modelSelect');
   if(!dd||!chip||!sel) return;
   const open=dd.classList.contains('open');
@@ -5046,7 +5048,10 @@ async function toggleModelDropdown(){
     if(ready&&typeof ready.catch==='function') ready.catch(()=>{});
   }
   if(dd.classList.contains('open')) return;
-  renderModelDropdown();
+  const triggerId=(mobileAction&&mobilePanel&&mobilePanel.classList.contains('open'))
+    ?'composerMobileModelAction'
+    :'composerModelChip';
+  renderModelDropdown({triggerId});
   dd.classList.add('open');
   dd.setAttribute('aria-hidden','false');
   _positionModelDropdown();
@@ -5054,7 +5059,6 @@ async function toggleModelDropdown(){
   if(activeRow&&typeof activeRow.scrollIntoView==='function') activeRow.scrollIntoView({block:'nearest'});
   chip.classList.add('active');
   chip.setAttribute('aria-expanded','true');
-  const mobileAction=$('composerMobileModelAction');
   if(mobileAction){
     mobileAction.classList.add('active');
     mobileAction.setAttribute('aria-expanded','true');

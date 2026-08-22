@@ -56,3 +56,10 @@ def test_picker_disclosures_and_rows_are_keyboard_operable():
     assert "row.setAttribute('role','button')" in UI
     assert "e.key!=='Enter'&&e.key!==' '" in UI
     assert ".model-opt:focus-visible" in CSS
+
+
+def test_escape_returns_focus_to_the_visible_mobile_model_trigger():
+    assert "mobilePanel.classList.contains('open')" in UI
+    assert "?'composerMobileModelAction'" in UI
+    assert "renderModelDropdown({triggerId})" in UI
+    assert "trigger.focus({preventScroll:true})" in UI
