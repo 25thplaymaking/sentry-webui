@@ -161,6 +161,7 @@ def test_dropdown_escapes_footer_containing_block_when_open_on_phone():
             const i = this.parentNode.children.indexOf(this);
             return this.parentNode.children[i + 1] || null;
           }}
+          setAttribute(name, value) {{ this[name] = String(value); }}
           getBoundingClientRect() {{ return this._rect; }}
         }}
 

@@ -4595,9 +4595,8 @@ function renderModelDropdown(){
   const _selectedModelEntry=(()=>{
     const _selVal=String((sel&&sel.value)||'');
     if(!_selVal) return null;
-    return _modelData.find(m=>m&&!m.endpointErrorOnly&&_isSelectedModelRow(m))
-      ||_modelData.find(m=>m&&!m.endpointErrorOnly&&String(m.value||'')===_selVal)
-      ||null;
+    const _hit=_modelData.find(m=>m&&!m.endpointErrorOnly&&_isSelectedModelRow(m)) || _modelData.find(m=>m&&!m.endpointErrorOnly&&String(m.value||'')===_selVal);
+    return _hit||null;
   })();
   const _selectedGroupKey=_selectedModelEntry?_selectedModelEntry.groupKey:null;
   const _selectedVendorPrefix=(()=>{
