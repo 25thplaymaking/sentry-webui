@@ -1491,7 +1491,8 @@ def test_runtime_picker_prioritizes_native_models_and_opens_only_selected_nous_v
                 "group_id": "nous",
                 "models": [
                     {"id": "deepseek-v4-flash", "label": "DeepSeek V4 Flash"},
-                    {"id": "deepseek/deepseek-v4-flash", "label": "DeepSeek V4 Flash"},
+                    {"id": "deepseek/deepseek-v4-flash-vision-exp", "label": "DeepSeek V4 Flash Vision"},
+                    {"id": "deepseek/deepseek-v4-pro-0813", "label": "DeepSeek V4 Pro"},
                     {"id": "deepseek/deepseek-r1", "label": "DeepSeek R1"},
                     {"id": "openai/gpt-5.4", "label": "GPT-5.4"},
                     {"id": "openai/o3", "label": "o3"},
@@ -1514,14 +1515,7 @@ def test_runtime_picker_prioritizes_native_models_and_opens_only_selected_nous_v
             },
         ],
         "selectedValue": "deepseek-v4-flash",
-        "selectedProvider": "nous",
-        "configuredBadges": {
-            "deepseek-v4-flash": {
-                "provider": "nous",
-                "role": "primary",
-                "label": "Primary",
-            }
-        },
+        "selectedProvider": "sentry",
         "searchTerm": "",
         "exerciseKeyboard": True,
     }
@@ -1565,7 +1559,7 @@ def test_runtime_picker_prioritizes_native_models_and_opens_only_selected_nous_v
         "ariaCurrent": "false",
     }
     assert out["selectedCalls"] == [
-        {"value": "deepseek-v4-flash", "provider": "nous"}
+        {"value": "chatgpt-plan/gpt-5.4-mini", "provider": "sentry"}
     ]
 
 

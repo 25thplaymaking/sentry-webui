@@ -4628,7 +4628,18 @@ function renderModelDropdown(){
     const identity=String(_selectedCatalogEntry.value||'').split('/').pop().replace(/-/g,'.').toLowerCase();
     const sibling=_modelData.find(m=>m&&m.groupKey===_selectedGroupKey&&_vendorPrefix(m.value)
       &&String(m.value||'').split('/').pop().replace(/-/g,'.').toLowerCase()===identity);
-    return sibling?_vendorPrefix(sibling.value):'';
+    if(sibling) return _vendorPrefix(sibling.value);
+    // Some catalog shortcuts are bare aliases (for example
+    // "deepseek-v4-flash") whose versioned catalog siblings do not share the
+    // same basename.  Match only against vendor prefixes that actually exist
+    // in this provider, longest first, so the shortcut still opens its vendor.
+    const shortcut=String(_selectedCatalogEntry.value||'').replace(/^~/,'').toLowerCase();
+    const vendors=[...new Set(_modelData
+      .filter(m=>m&&m.groupKey===_selectedGroupKey&&_vendorPrefix(m.value))
+      .map(m=>_vendorPrefix(m.value).toLowerCase()))]
+      .sort((a,b)=>b.length-a.length);
+    return vendors.find(vendor=>shortcut===vendor||shortcut.startsWith(`${vendor}-`)
+      ||shortcut.startsWith(`${vendor}.`)||shortcut.startsWith(`${vendor}_`))||'';
   })();
   const _selectedSubGroupKey=_selectedModelEntry&&_selectedGroupKey
     ?`${_selectedGroupKey}::${_selectedVendorPrefix}`
