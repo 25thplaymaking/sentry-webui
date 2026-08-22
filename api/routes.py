@@ -16342,6 +16342,9 @@ def handle_post(handler, parsed) -> bool:
         existing_native_workspace_id = getattr(s, "native_workspace_id", None)
         if not isinstance(existing_native_workspace_id, str):
             existing_native_workspace_id = None
+        existing_native_runtime_options = getattr(s, "native_runtime_options", {})
+        if not isinstance(existing_native_runtime_options, dict):
+            existing_native_runtime_options = {}
         try:
             native_workspace_id = _validate_native_workspace_id(
                 body.get("native_workspace_id", existing_native_workspace_id)
@@ -16349,7 +16352,7 @@ def handle_post(handler, parsed) -> bool:
             native_runtime_options = _validate_native_runtime_options(
                 body.get(
                     "native_runtime_options",
-                    getattr(s, "native_runtime_options", {}),
+                    existing_native_runtime_options,
                 )
             )
         except ValueError as e:

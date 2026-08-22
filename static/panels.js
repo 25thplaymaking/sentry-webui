@@ -8222,11 +8222,10 @@ async function loadMemory(force) {
     }
     if (panel) {
       panel.innerHTML = '';
-      const visibleSections=_isSentryProductMode()
-        ?MEMORY_SECTIONS.filter(section=>['memory','user','soul'].includes(section.key))
-        :MEMORY_SECTIONS;
-      for (const s of visibleSections) {
+      for (const s of MEMORY_SECTIONS) {
+        if(typeof _isSentryProductMode==='function'&&_isSentryProductMode()&&!['memory','user','soul'].includes(s.key)) continue;
         if (s.key === 'external_notes' && !_memoryData.external_notes_enabled) continue;
+        if(typeof _isSentryProductMode==='function'&&_isSentryProductMode()&&!_currentMemorySection) _currentMemorySection=s.key;
         const el = document.createElement('button');
         el.type = 'button';
         el.className = 'side-menu-item';
@@ -8236,11 +8235,6 @@ async function loadMemory(force) {
         if (sectionPath) el.title = sectionPath;
         el.onclick = () => openMemorySection(s.key, el);
         panel.appendChild(el);
-      }
-      if(_isSentryProductMode()&&!_currentMemorySection&&visibleSections.length){
-        const first=panel.querySelector('.side-menu-item');
-        _currentMemorySection=visibleSections[0].key;
-        if(first)first.classList.add('active');
       }
     }
     if (_currentMemorySection && _memoryMode !== 'edit') {
@@ -8773,13 +8767,11 @@ function switchSettingsSection(name,opts){
   // Sync mobile dropdown
   const dd=$('settingsSectionDropdown');
   if(dd && dd.value!==section) dd.value=section;
-  // Lazy-load integration panels when their tabs are opened. Search
-  // navigation passes skipLazyLoad: the loaders rebuild the pane DOM from a
-  // fresh fetch, which would detach the field it is about to scroll to.
+  // Search skips loaders because they rebuild the field being navigated to.
   if(!(opts&&opts.skipLazyLoad)){
+    if(section==='extensions') loadExtensionsPanel();
     if(section==='providers') loadProvidersPanel();
     if(section==='plugins') loadPluginsPanel();
-    if(section==='extensions') loadExtensionsPanel();
   }
   if(opts&&opts.fromSidebarItem)_closeMobileSidebarAfterPanelSelection();
 }
