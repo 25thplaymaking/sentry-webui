@@ -49,19 +49,21 @@ def test_native_controls_are_strict_and_receive_safe_defaults():
 
 
 def test_codex_work_context_is_hidden_until_a_native_model_is_selected():
-    assert 'id="nativeRuntimeBar" hidden' in HTML
+    assert 'id="nativeRuntimeBar" role="dialog"' in HTML
+    assert 'id="nativeRuntimeComposerWrap" hidden' in HTML
+    assert 'id="nativeRuntimeMenuBtn"' in HTML
     assert 'id="nativeWorkspaceSelect"' in HTML
     assert 'id="nativeRuntimeFeatures"' in HTML
     assert "function syncNativeRuntimeBar()" in UI
-    assert "bar.hidden=true" in UI
+    assert "wrap.hidden=true" in UI
+    assert "_setNativeRuntimeMenuOpen(false)" in UI
     assert "_selectedNativeRuntimeId()" in UI
     assert "Active from your Codex installation" not in HTML
+    assert HTML.index('id="composerBox"') < HTML.index('id="nativeRuntimeBar"')
 
 
 def test_codex_controls_are_real_inputs_and_inventory_is_runtime_driven():
     for control_id in (
-        "nativeActionSelect",
-        "nativeCollaborationModeSelect",
         "nativeEffortSelect",
         "nativeSandboxSelect",
         "nativePersonalitySelect",
@@ -75,6 +77,11 @@ def test_codex_controls_are_real_inputs_and_inventory_is_runtime_driven():
     assert "inventory.mcp_servers" in UI
     assert "inventory.plugins" in UI
     assert "inventory.hooks" in UI
+    assert 'id="nativePlanToggle"' in HTML
+    assert 'id="nativeReviewToggle"' in HTML
+    assert "toggleNativeRuntimeQuickOption(" in HTML
+    assert "filterNativeRuntimeInventory(" in UI
+    assert "Search installed tools" in UI
 
 
 def test_model_picker_marks_native_models_and_forces_work():
@@ -107,16 +114,38 @@ def test_native_runtime_controls_have_disclosure_and_status_semantics():
     assert 'id="nativeRuntimeFeatures" role="region"' in HTML
     assert 'aria-label="Connected Codex tools and extensions"' in HTML
     assert 'aria-controls="nativeRuntimeFeatures"' in HTML
+    assert 'aria-controls="nativeRuntimeBar"' in HTML
+    assert 'aria-label="Add Codex context and tools"' in HTML
     assert "panel.setAttribute('aria-hidden',open?'false':'true')" in UI
+    assert "function _setNativeRuntimeMenuOpen(open)" in UI
+    assert "const first=(workspace&&!workspace.disabled)" in UI
+    assert "panel.querySelector('.native-runtime-menu-close')" in UI
     assert "event.key!=='Escape'" in UI
 
 
 def test_native_runtime_controls_are_touch_and_keyboard_friendly():
     assert ".native-workspace-control select:focus-visible" in CSS
     assert ".native-runtime-features-btn:focus-visible" in CSS
-    assert ".native-workspace-control select{max-width:none;width:100%;min-height:44px;font-size:16px;}" in CSS
-    assert ".native-runtime-features-btn{min-height:44px" in CSS
+    assert ".native-runtime-menu-btn:focus-visible" in CSS
+    assert ".native-runtime-menu-close,.native-runtime-menu-btn{min-width:44px;min-height:44px;}" in CSS
+    assert ".native-workspace-control select{width:calc(100% - 35px);max-width:none;min-height:44px" in CSS
+    assert ".native-runtime-menu-body{min-height:0;overflow-x:hidden;overflow-y:auto" in CSS
+    assert ".native-inventory-search input{min-height:44px;font-size:16px;}" in CSS
     assert "@media(prefers-reduced-motion:reduce)" in CSS
+
+
+def test_native_setup_uses_one_composer_plus_menu_instead_of_a_control_ribbon():
+    assert '<div class="native-runtime-menu" id="nativeRuntimeBar"' in HTML
+    assert '<div class="native-runtime-bar" id="nativeRuntimeBar"' not in HTML
+    assert 'data-tooltip="Add Codex context and tools"' in HTML
+    assert "Add to this task" in HTML
+    assert "Files and folders" in HTML
+    assert "Plan mode" in HTML
+    assert "Review changes" in HTML
+    assert "Work settings" in HTML
+    assert "Tools and extensions" in HTML
+    assert "position:absolute;z-index:220;left:10px;bottom:54px" in CSS
+    assert '.native-runtime-menu-btn[aria-expanded="true"]>svg{transform:rotate(45deg);}' not in CSS
 
 
 def test_workspace_update_failure_is_visible_to_the_user():

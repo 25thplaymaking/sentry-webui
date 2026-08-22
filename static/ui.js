@@ -11341,26 +11341,69 @@ function _setNativeRuntimeFeaturesOpen(open){
   }
   if(button) button.setAttribute('aria-expanded',open?'true':'false');
 }
+function _setNativeRuntimeMenuOpen(open){
+  const panel=$('nativeRuntimeBar');
+  const button=$('nativeRuntimeMenuBtn');
+  const wrap=$('nativeRuntimeComposerWrap');
+  const next=Boolean(open&&panel&&wrap&&!wrap.hidden);
+  if(panel) panel.hidden=!next;
+  if(button) button.setAttribute('aria-expanded',next?'true':'false');
+  if(next){
+    if(typeof closeModelDropdown==='function') closeModelDropdown();
+    if(typeof closeReasoningDropdown==='function') closeReasoningDropdown();
+    if(typeof closeMobileComposerConfig==='function') closeMobileComposerConfig();
+    if(typeof requestAnimationFrame==='function'){
+      requestAnimationFrame(()=>{
+        const workspace=$('nativeWorkspaceSelect');
+        const plan=$('nativePlanToggle');
+        const first=(workspace&&!workspace.disabled)
+          ?workspace
+          :((plan&&!plan.disabled)?plan:panel.querySelector('.native-runtime-menu-close'));
+        if(first&&typeof first.focus==='function') first.focus({preventScroll:true});
+      });
+    }
+  }else{
+    _setNativeRuntimeFeaturesOpen(false);
+  }
+}
+function toggleNativeRuntimeMenu(event){
+  if(event&&typeof event.stopPropagation==='function') event.stopPropagation();
+  const panel=$('nativeRuntimeBar');
+  _setNativeRuntimeMenuOpen(Boolean(panel&&panel.hidden));
+}
 function toggleNativeRuntimeFeatures(event){
   if(event&&typeof event.stopPropagation==='function') event.stopPropagation();
   const panel=$('nativeRuntimeFeatures');
-  _setNativeRuntimeFeaturesOpen(Boolean(panel&&panel.hidden));
+  const next=Boolean(panel&&panel.hidden);
+  _setNativeRuntimeFeaturesOpen(next);
+  if(next&&typeof requestAnimationFrame==='function'){
+    requestAnimationFrame(()=>{const input=$('nativeRuntimeInventorySearch');if(input&&typeof input.focus==='function') input.focus({preventScroll:true});});
+  }
 }
 document.addEventListener('click',event=>{
-  const panel=$('nativeRuntimeFeatures');
-  const wrap=event&&event.target&&typeof event.target.closest==='function'
-    ?event.target.closest('.native-runtime-features-wrap')
-    :null;
-  if(panel&&!panel.hidden&&!wrap) _setNativeRuntimeFeaturesOpen(false);
+  const panel=$('nativeRuntimeBar');
+  if(!panel||panel.hidden) return;
+  const target=event&&event.target&&typeof event.target.closest==='function'?event.target:null;
+  const inside=target&&(target.closest('#nativeRuntimeBar')||target.closest('#nativeRuntimeComposerWrap'));
+  if(!inside) _setNativeRuntimeMenuOpen(false);
 });
 document.addEventListener('keydown',event=>{
   if(!event||event.key!=='Escape') return;
-  const panel=$('nativeRuntimeFeatures');
-  if(!panel||panel.hidden) return;
-  event.preventDefault();
-  _setNativeRuntimeFeaturesOpen(false);
-  const button=$('nativeRuntimeFeaturesBtn');
-  if(button&&typeof button.focus==='function') button.focus({preventScroll:true});
+  const features=$('nativeRuntimeFeatures');
+  if(features&&!features.hidden){
+    event.preventDefault();
+    _setNativeRuntimeFeaturesOpen(false);
+    const button=$('nativeRuntimeFeaturesBtn');
+    if(button&&typeof button.focus==='function') button.focus({preventScroll:true});
+    return;
+  }
+  const panel=$('nativeRuntimeBar');
+  if(panel&&!panel.hidden){
+    event.preventDefault();
+    _setNativeRuntimeMenuOpen(false);
+    const button=$('nativeRuntimeMenuBtn');
+    if(button&&typeof button.focus==='function') button.focus({preventScroll:true});
+  }
 });
 function _nativeInventoryLabel(kind,item){
   if(!item||typeof item!=='object') return '';
@@ -11380,6 +11423,7 @@ function _appendNativeInventorySection(container,title,kind,items){
   if(!Array.isArray(items)||!items.length) return 0;
   const section=document.createElement('section');
   section.className='native-inventory-section';
+  section.dataset.nativeInventorySection=kind;
   const heading=document.createElement('div');
   heading.className='native-inventory-heading';
   heading.textContent=`${title} (${items.length})`;
@@ -11397,6 +11441,7 @@ function _appendNativeInventorySection(container,title,kind,items){
     name.textContent=label;
     copy.appendChild(name);
     const description=_nativeInventoryDescription(kind,item);
+    row.dataset.nativeInventorySearch=`${title} ${label} ${description}`.toLowerCase();
     if(description){
       const meta=document.createElement('span');
       meta.textContent=description;
@@ -11416,14 +11461,42 @@ function _appendNativeInventorySection(container,title,kind,items){
   container.appendChild(section);
   return items.length;
 }
+function filterNativeRuntimeInventory(value){
+  const panel=$('nativeRuntimeFeatures');
+  if(!panel) return;
+  const query=String(value||'').trim().toLowerCase();
+  let visible=0;
+  for(const section of panel.querySelectorAll('[data-native-inventory-section]')){
+    let sectionVisible=0;
+    for(const row of section.querySelectorAll('.native-inventory-row')){
+      const match=!query||String(row.dataset.nativeInventorySearch||'').includes(query);
+      row.hidden=!match;
+      if(match){visible+=1;sectionVisible+=1;}
+    }
+    section.hidden=sectionVisible===0;
+  }
+  const empty=$('nativeInventoryNoResults');
+  if(empty) empty.hidden=!query||visible!==0;
+}
 function _renderNativeRuntimeInventory(runtime){
   const panel=$('nativeRuntimeFeatures');
   if(!panel) return;
   panel.innerHTML='';
   const intro=document.createElement('div');
   intro.className='native-runtime-boundary';
-  intro.textContent='Loaded from the Codex installation on your linked machine. These are the tools and extensions Codex can actually see for this workspace.';
+  intro.textContent='Reported by the Codex installation on your linked machine. Only installed and available items appear here.';
   panel.appendChild(intro);
+  const search=document.createElement('label');
+  search.className='native-inventory-search';
+  search.innerHTML='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>';
+  const searchInput=document.createElement('input');
+  searchInput.id='nativeRuntimeInventorySearch';
+  searchInput.type='search';
+  searchInput.placeholder='Search installed tools';
+  searchInput.setAttribute('aria-label','Search installed Codex tools and extensions');
+  searchInput.addEventListener('input',()=>filterNativeRuntimeInventory(searchInput.value));
+  search.appendChild(searchInput);
+  panel.appendChild(search);
   const inventory=runtime&&runtime.inventory&&typeof runtime.inventory==='object'?runtime.inventory:{};
   let total=0;
   total+=_appendNativeInventorySection(panel,'Skills','skills',inventory.skills);
@@ -11441,21 +11514,32 @@ function _renderNativeRuntimeInventory(runtime){
       :'Connect the workstation to load its Codex inventory.';
     panel.appendChild(empty);
   }
+  const noResults=document.createElement('div');
+  noResults.id='nativeInventoryNoResults';
+  noResults.className='native-inventory-empty';
+  noResults.textContent='No installed tools match that search.';
+  noResults.hidden=true;
+  panel.appendChild(noResults);
   const count=$('nativeRuntimeInventoryCount');
   if(count) count.textContent=total?String(total):'';
+  const summary=$('nativeRuntimeToolsSummary');
+  if(summary) summary.textContent=total?`${total} installed items from this Codex runtime`:'No optional tools reported by this Codex runtime';
 }
 function syncNativeRuntimeBar(){
   const bar=$('nativeRuntimeBar');
   const select=$('nativeWorkspaceSelect');
-  if(!bar||!select) return;
+  const wrap=$('nativeRuntimeComposerWrap');
+  const button=$('nativeRuntimeMenuBtn');
+  if(!bar||!select||!wrap||!button) return;
   const runtimeId=typeof _selectedNativeRuntimeId==='function'?_selectedNativeRuntimeId():'';
   if(!runtimeId){
-    bar.hidden=true;
-    _setNativeRuntimeFeaturesOpen(false);
+    wrap.hidden=true;
+    _setNativeRuntimeMenuOpen(false);
     return;
   }
   const runtime=_nativeRuntimeById(runtimeId)||{id:runtimeId,available:false,workspaces:[],features:[],inventory:{},reason:'This native runtime is not connected.'};
-  bar.hidden=false;
+  wrap.hidden=false;
+  wrap.classList.toggle('is-offline',!runtime.available);
   bar.classList.toggle('is-offline',!runtime.available);
   const status=$('nativeRuntimeStatus');
   if(status){
@@ -11484,11 +11568,17 @@ function syncNativeRuntimeBar(){
   S._pendingNativeRuntimeOptions={...options};
   if(S.session) S.session.native_runtime_options={...options};
   const setValue=(id,value)=>{const element=$(id);if(element) element.value=value==null?'':String(value);};
-  setValue('nativeActionSelect',options.action);
-  setValue('nativeCollaborationModeSelect',options.collaboration_mode);
   setValue('nativeSandboxSelect',options.sandbox);
   setValue('nativePersonalitySelect',options.personality);
   setValue('nativeApprovalSelect',options.approval_policy);
+  const syncToggle=(id,active)=>{
+    const element=$(id);
+    if(!element) return;
+    element.setAttribute('aria-pressed',active?'true':'false');
+    element.disabled=!runtime.available;
+  };
+  syncToggle('nativePlanToggle',options.collaboration_mode==='plan');
+  syncToggle('nativeReviewToggle',options.action==='review');
   const workspace=_nativeWorkspace(runtime,workspaceId);
   const modes=workspace&&Array.isArray(workspace.modes)?workspace.modes:[];
   const sandbox=$('nativeSandboxSelect');
@@ -11524,6 +11614,13 @@ function syncNativeRuntimeBar(){
       if(control.id!=='nativeSandboxSelect'&&control.id!=='nativeEffortSelect') control.disabled=!runtime.available;
     }
   }
+  const settingsSummary=$('nativeRuntimeSettingsSummary');
+  if(settingsSummary){
+    const effortLabel=options.effort?String(options.effort).replace(/^./,letter=>letter.toUpperCase()):'Model default';
+    const filesLabel=options.sandbox==='readOnly'?'Read only':'Can edit';
+    const approvalLabel=options.approval_policy==='untrusted'?'Ask for untrusted':'Ask when needed';
+    settingsSummary.textContent=`${effortLabel} · ${filesLabel} · ${approvalLabel}`;
+  }
   _renderNativeRuntimeInventory(runtime);
   const msg=$('msg');
   if(msg&&_currentExperience()==='work'){
@@ -11531,6 +11628,13 @@ function syncNativeRuntimeBar(){
       ?'Ask Codex to review the uncommitted changes…'
       :(options.collaboration_mode==='plan'?'Ask Codex to plan the work…':'Ask Codex to work…');
   }
+}
+async function toggleNativeRuntimeQuickOption(key,activeValue,inactiveValue){
+  const runtime=_nativeRuntimeById(typeof _selectedNativeRuntimeId==='function'?_selectedNativeRuntimeId():'');
+  if(!runtime||!runtime.available) return;
+  const options=_currentNativeRuntimeOptions(runtime);
+  const next=options[key]===activeValue?inactiveValue:activeValue;
+  await selectNativeRuntimeOption(key,next);
 }
 async function selectNativeRuntimeOption(key,value){
   const runtime=_nativeRuntimeById(typeof _selectedNativeRuntimeId==='function'?_selectedNativeRuntimeId():'');
