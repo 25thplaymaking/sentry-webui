@@ -6003,6 +6003,15 @@ document.addEventListener('keydown',function(e){
   if(e.key!=='Escape') return;
   const panel=$('composerMobileConfigPanel');
   if(!panel||!panel.classList.contains('open')) return;
+  const modelDropdown=$('composerModelDropdown');
+  if(modelDropdown&&modelDropdown.classList.contains('open')){
+    e.preventDefault();
+    e.stopPropagation();
+    closeModelDropdown();
+    const modelAction=$('composerMobileModelAction');
+    if(modelAction&&typeof modelAction.focus==='function') modelAction.focus({preventScroll:true});
+    return;
+  }
   e.preventDefault();
   closeMobileComposerConfig();
   if(typeof closeWsDropdown==='function') closeWsDropdown();

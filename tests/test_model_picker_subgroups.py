@@ -63,3 +63,5 @@ def test_escape_returns_focus_to_the_visible_mobile_model_trigger():
     assert "?'composerMobileModelAction'" in UI
     assert "renderModelDropdown({triggerId})" in UI
     assert "trigger.focus({preventScroll:true})" in UI
+    assert "modelDropdown.classList.contains('open')" in UI
+    assert "modelAction.focus({preventScroll:true})" in UI
