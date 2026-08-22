@@ -132,12 +132,20 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/b
 
 COPY --chown=root:root . /apptoo
 
-# Bake the git version tag into the image so the settings badge works even
+# Bake a version into the image so api/updates.py can report it at runtime even
 # when .git is not present (it is excluded by .dockerignore).
-# CI passes: --build-arg HERMES_VERSION=$(git describe --tags --always)
-# Local builds that omit the arg get "unknown" as the fallback.
+# CI can pass: --build-arg HERMES_VERSION=$(git describe --tags --always)
+# Ordinary Compose builds derive a deterministic source digest instead. That
+# digest also versions the service-worker cache and every browser asset URL, so
+# hosted updates cannot remain stuck behind a literal "unknown" cache key.
 ARG HERMES_VERSION=unknown
-RUN echo "__version__ = '${HERMES_VERSION}'" > /apptoo/api/_version.py
+RUN HERMES_BUILD_VERSION="${HERMES_VERSION}"; \
+    if [ -z "${HERMES_BUILD_VERSION}" ] || [ "${HERMES_BUILD_VERSION}" = "unknown" ]; then \
+        HERMES_SOURCE_DIGEST="$(find /apptoo -type f ! -path '/apptoo/api/_version.py' -print0 \
+            | sort -z | xargs -0 sha256sum | sha256sum | cut -c1-16)"; \
+        HERMES_BUILD_VERSION="source-${HERMES_SOURCE_DIGEST}"; \
+    fi; \
+    printf "__version__ = '%s'\n" "${HERMES_BUILD_VERSION}" > /apptoo/api/_version.py
 
 # Default to binding all interfaces (required for container networking)
 ENV HERMES_WEBUI_HOST=0.0.0.0

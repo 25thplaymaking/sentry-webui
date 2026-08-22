@@ -21,6 +21,7 @@ BOOT = ROOT / "static" / "boot.js"
 INDEX = ROOT / "static" / "index.html"
 ROUTES = ROOT / "api" / "routes.py"
 AUTH = ROOT / "api" / "auth.py"
+DOCKERFILE = ROOT / "Dockerfile"
 
 # FRONTIR: the manifest-route tests below used the literal "Hermes" as a
 # sentinel that the route returned the manifest document rather than HTML or a
@@ -28,6 +29,15 @@ AUTH = ROOT / "api" / "auth.py"
 # name from that file keeps exactly the same check while surviving this fork's
 # rebrand (and any later rename) instead of pinning a product name in a test.
 APP_NAME = json.loads(MANIFEST.read_text(encoding="utf-8"))["name"]
+
+
+def test_compose_build_derives_a_real_browser_cache_version():
+    """Hosted Compose builds must never share the literal ``unknown`` stamp."""
+    src = DOCKERFILE.read_text(encoding="utf-8")
+    assert 'HERMES_BUILD_VERSION="source-${HERMES_SOURCE_DIGEST}"' in src
+    assert "find /apptoo -type f ! -path '/apptoo/api/_version.py'" in src
+    assert 'printf "__version__ = \'%s\'\\n" "${HERMES_BUILD_VERSION}"' in src
+    assert "RUN echo \"__version__ = '${HERMES_VERSION}'\"" not in src
 
 
 class TestManifest:
