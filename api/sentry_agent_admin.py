@@ -145,6 +145,19 @@ def pending_decide(handler, subsystem: str, pending_id: str, decision: str) -> d
 # ---------------------------------------------------------------------------
 
 
+def _route_models(value) -> list[dict]:
+    """Browser-safe selectable aliases; route internals never cross this seam."""
+    models = []
+    for entry in value or []:
+        if not isinstance(entry, dict):
+            continue
+        alias = str(entry.get("id") or "").strip()
+        model = str(entry.get("model") or "").strip()
+        if alias and model:
+            models.append({"id": alias, "model": model})
+    return models
+
+
 def auth_providers(handler) -> dict:
     """Credential providers, and which this profile is signed into.
 
@@ -173,6 +186,8 @@ def auth_providers(handler) -> dict:
                 "oauth_capable": bool(entry.get("oauth_capable")),
                 "browser_login": bool(entry.get("oauth_over_http")),
                 "unavailable_reason": entry.get("oauth_unavailable_reason"),
+                "models": _route_models(entry.get("models")),
+                "route_error": entry.get("route_error"),
                 "credentials": [
                     {
                         "id": cred.get("id"),
@@ -216,6 +231,8 @@ def auth_oauth_start(handler, body: dict) -> dict:
         "poll_interval_seconds": data.get("poll_interval_seconds", 3),
         "instructions": data.get("instructions"),
         "credential": data.get("credential") or {},
+        "models": _route_models(data.get("models")),
+        "route_error": data.get("route_error"),
     }
 
 
@@ -245,6 +262,8 @@ def auth_oauth_status(handler, flow_id: str) -> dict:
         "error": data.get("error"),
         # Identity only; Hermes never includes access/refresh tokens here.
         "credential": data.get("credential") or {},
+        "models": _route_models(data.get("models")),
+        "route_error": data.get("route_error"),
     }
 
 
@@ -293,6 +312,8 @@ def auth_oauth_complete(handler, body: dict) -> dict:
         # Identity only. The token itself stays inside Hermes' credential store
         # and is never returned to the browser.
         "credential": data.get("credential") or {},
+        "models": _route_models(data.get("models")),
+        "route_error": data.get("route_error"),
     }
 
 

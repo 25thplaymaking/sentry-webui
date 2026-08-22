@@ -17,6 +17,9 @@ These tests pin the properties that keep the proxy honest:
   4. Access tokens never come back to the browser.
 """
 
+import json
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -185,6 +188,36 @@ class TestCredentials:
         cred = out["providers"][0]["credentials"][0]
         assert set(cred) == {"id", "label", "auth_type", "expires_at_ms"}
 
+    def test_connected_provider_exposes_only_selectable_route_metadata(
+        self, monkeypatch, as_signed_in
+    ):
+        stub_call(monkeypatch, result={"data": [{
+            "id": "openai-codex",
+            "name": "OpenAI Codex",
+            "authenticated": True,
+            "oauth_capable": True,
+            "oauth_over_http": True,
+            "models": [
+                {
+                    "id": "chatgpt-plan/gpt-5.6-sol",
+                    "model": "gpt-5.6-sol",
+                    "api_key": "SECRET-MUST-NOT-LEAK",
+                },
+                {"id": "", "model": "invalid"},
+            ],
+            "route_error": None,
+            "credentials": [],
+        }]})
+
+        provider = admin.auth_providers(FakeHandler())["providers"][0]
+
+        assert provider["models"] == [{
+            "id": "chatgpt-plan/gpt-5.6-sol",
+            "model": "gpt-5.6-sol",
+        }]
+        assert provider["route_error"] is None
+        assert "SECRET-MUST-NOT-LEAK" not in repr(provider)
+
     def test_completed_login_returns_identity_not_token(self, monkeypatch, as_signed_in):
         stub_call(monkeypatch, result={
             "provider": "anthropic",
@@ -261,6 +294,55 @@ def test_agent_admin_ui_has_no_server_command_fallback():
     assert "agentAdminPollOAuth" in source
     assert "agentAdminCopyOAuthCode" in source
     assert "Open sign-in page" in source
+
+
+def test_connected_subscription_can_select_a_model_without_changing_deepseek_on_render():
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is required for the subscription UI behavior test")
+    script_path = Path(admin.__file__).parent.parent / "static" / "agent_admin.js"
+    driver = f"""
+const fs = require('fs');
+const vm = require('vm');
+const source = fs.readFileSync({json.dumps(str(script_path))}, 'utf8');
+const nodes = {{
+  agentAdminProviders: {{innerHTML: ''}},
+  agentAdminOAuthBox: {{style: {{}}, innerHTML: ''}},
+}};
+let picked = [];
+let refreshed = 0;
+global.window = global;
+global.document = {{getElementById: id => nodes[id] || null}};
+global.S = {{session: {{model: 'deepseek-v4-flash', model_provider: 'sentry'}}}};
+global.populateModelDropdown = async () => {{ refreshed += 1; }};
+global.selectModelFromDropdown = async (model, provider) => picked.push([model, provider]);
+global.showToast = () => {{}};
+vm.runInThisContext(source, {{filename: 'agent_admin.js'}});
+const payload = {{available: true, providers: [{{
+  id: 'openai-codex', name: 'OpenAI Codex', authenticated: true,
+  browser_login: true, route_error: null, credentials: [],
+  models: [
+    {{id: 'chatgpt-plan/gpt-5.6-sol', model: 'gpt-5.6-sol'}},
+    {{id: 'chatgpt-plan/gpt-5.6-terra', model: 'gpt-5.6-terra'}},
+  ],
+}}]}};
+const html = _aaRenderProviders(payload);
+nodes[agentAdminProviderSelectId('openai-codex')] = {{value: 'chatgpt-plan/gpt-5.6-sol'}};
+(async () => {{
+  const before = picked.length;
+  await agentAdminUseProviderModel('openai-codex');
+  process.stdout.write(JSON.stringify({{html, before, picked, refreshed}}));
+}})().catch(error => {{ console.error(error); process.exit(1); }});
+"""
+    result = subprocess.run(
+        [node, "-e", driver], capture_output=True, text=True, check=True
+    )
+    data = json.loads(result.stdout)
+    assert data["before"] == 0, "rendering must leave DeepSeek selected"
+    assert "Use in chat" in data["html"]
+    assert "gpt-5.6-sol" in data["html"]
+    assert data["picked"] == [["chatgpt-plan/gpt-5.6-sol", "sentry"]]
+    assert data["refreshed"] == 1
 
 
 class TestLogout:

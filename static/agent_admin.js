@@ -16,6 +16,7 @@ const AGENT_ADMIN_SUBSYSTEMS = ['memory', 'skills'];
 let _agentAdminOAuthFlow = null;   // {flow_id, provider, authorize_url}
 let _agentAdminOAuthPollTimer = null;
 let _agentAdminBusy = false;
+let _agentAdminProvidersPayload = null;
 
 function _aaEsc(value) {
   return String(value == null ? '' : value).replace(/[&<>"']/g, c => ({
@@ -164,42 +165,112 @@ async function agentAdminDecide(subsystem, pendingId, decision) {
 
 function _aaRenderProviders(payload) {
   if (!payload || payload.available !== true) {
-    return _aaUnavailable(payload, 'Agent credentials');
+    return _aaUnavailable(payload, 'AI subscriptions');
   }
-  const providers = (payload.providers || []).filter(p => p.oauth_capable || p.authenticated);
+  const providers = (payload.providers || [])
+    .filter(p => p.oauth_capable || p.authenticated)
+    .slice()
+    .sort((a, b) => {
+      if (Boolean(a.authenticated) !== Boolean(b.authenticated)) return a.authenticated ? -1 : 1;
+      if (Boolean(a.browser_login) !== Boolean(b.browser_login)) return a.browser_login ? -1 : 1;
+      return String(a.name || a.id).localeCompare(String(b.name || b.id));
+    });
   if (!providers.length) {
-    return `<div style="padding:12px;color:var(--muted);font-size:12px">No credential providers reported.</div>`;
+    return `<div class="agent-provider-empty">No subscription providers are available.</div>`;
   }
   return providers.map(p => {
     const id = _aaEsc(p.id);
     const name = _aaEsc(p.name || p.id);
-    const creds = (p.credentials || []).map(c =>
-      `<div style="font-size:11px;color:var(--muted)">· ${_aaEsc(c.label || c.id)} (${_aaEsc(c.auth_type || 'credential')})</div>`
-    ).join('');
-    let action;
+    const models = Array.isArray(p.models)
+      ? p.models.filter(m => m && m.id && m.model)
+      : [];
+    const currentModel = (typeof S !== 'undefined' && S.session)
+      ? String(S.session.model || '')
+      : '';
+    const current = models.some(m => String(m.id) === currentModel);
+    const count = models.length;
+    const modelWord = count === 1 ? 'model' : 'models';
+    const selectId = agentAdminProviderSelectId(p.id);
+
     if (p.authenticated) {
-      action = `<button class="btn" onclick="agentAdminLogout('${id}')">Sign out</button>`;
-    } else if (p.browser_login) {
-      action = `<button class="btn" onclick="agentAdminStartOAuth('${id}')">Connect</button>`;
-    } else {
-      const reason = p.unavailable_reason
-        || 'This provider does not currently offer an in-app connection flow.';
-      action = `<div style="max-width:220px;font-size:11px;color:var(--muted);text-align:right">${_aaEsc(reason)}</div>`;
-    }
-    return `<div style="padding:12px;border:1px solid var(--border);border-radius:8px;margin-bottom:8px">
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
-        <div>
-          <div style="font-size:12px;font-weight:600">${name}</div>
-          ${name !== id ? `<div style="font-size:10px;color:var(--muted)">${id}</div>` : ''}
-          <div style="font-size:11px;color:${p.authenticated ? '#2a2' : 'var(--muted)'}">
-            ${p.authenticated ? 'Connected' : 'Not connected'}
+      const routeError = String(p.route_error || '').trim();
+      const ready = !routeError && count > 0;
+      const options = models.map(m => {
+        const selected = String(m.id) === currentModel ? ' selected' : '';
+        return `<option value="${_aaEsc(m.id)}"${selected}>${_aaEsc(m.model)}</option>`;
+      }).join('');
+      const modelControl = routeError || !count
+        ? `<div class="agent-provider-route-error" role="status">
+             ${_aaEsc(routeError || 'Connected, but no selectable models were reported.')}
+           </div>
+           <button class="btn" onclick="loadAgentAdmin()">Try again</button>`
+        : `<label class="agent-provider-model-label" for="${_aaEsc(selectId)}">Choose a model</label>
+           <div class="agent-provider-model-row">
+             <select id="${_aaEsc(selectId)}" class="agent-provider-model-select">${options}</select>
+             <button class="btn" onclick="agentAdminUseProviderModel('${id}')">Use in chat</button>
+           </div>`;
+      return `<section class="agent-provider-card is-connected" data-provider="${id}">
+        <div class="agent-provider-head">
+          <div>
+            <div class="agent-provider-name">${name}</div>
+            <div class="agent-provider-status ${ready ? 'is-ready' : 'is-error'}">
+              ${ready ? ((current ? 'In use' : 'Ready') + ' · ' + count + ' ' + modelWord) : 'Connected · models unavailable'}
+            </div>
           </div>
+          <span class="agent-provider-ready ${ready ? '' : 'has-error'}" aria-label="Connected">${ready ? 'Ready' : 'Connected'}</span>
         </div>
-        <div>${action}</div>
-      </div>
-      ${creds}
-    </div>`;
+        <div class="agent-provider-models">${modelControl}</div>
+        <button class="agent-provider-disconnect" onclick="agentAdminLogout('${id}')">Disconnect</button>
+      </section>`;
+    }
+
+    if (p.browser_login) {
+      return `<section class="agent-provider-card" data-provider="${id}">
+        <div class="agent-provider-head">
+          <div>
+            <div class="agent-provider-name">${name}</div>
+            <div class="agent-provider-status">Use your existing subscription. No API key needed.</div>
+          </div>
+          <button class="btn" onclick="agentAdminStartOAuth('${id}')">Connect</button>
+        </div>
+      </section>`;
+    }
+
+    const reason = p.unavailable_reason
+      || 'This provider does not currently offer an in-app connection flow.';
+    return `<section class="agent-provider-card is-unavailable" data-provider="${id}">
+      <div class="agent-provider-name">${name}</div>
+      <div class="agent-provider-status">${_aaEsc(reason)}</div>
+    </section>`;
   }).join('');
+}
+
+function agentAdminProviderSelectId(provider) {
+  return `agentAdminModel-${String(provider || '').replace(/[^A-Za-z0-9_-]/g, '-')}`;
+}
+
+function _aaProviderName(provider) {
+  const providers = (_agentAdminProvidersPayload && _agentAdminProvidersPayload.providers) || [];
+  const match = providers.find(p => String(p.id || '') === String(provider || ''));
+  return (match && match.name) || provider || 'account';
+}
+
+async function agentAdminUseProviderModel(provider) {
+  const select = document.getElementById(agentAdminProviderSelectId(provider));
+  const model = select ? String(select.value || '').trim() : '';
+  if (!model) {
+    _aaToast('Choose a model first.');
+    return;
+  }
+  if (typeof populateModelDropdown === 'function') await populateModelDropdown();
+  if (typeof selectModelFromDropdown !== 'function') {
+    _aaToast('The model picker is not ready yet. Try again shortly.');
+    return;
+  }
+  await selectModelFromDropdown(model, 'sentry');
+  _aaToast(`Using ${select.options && select.selectedIndex >= 0
+    ? select.options[select.selectedIndex].textContent
+    : model} for this conversation.`);
 }
 
 async function agentAdminStartOAuth(provider) {
@@ -217,8 +288,13 @@ async function agentAdminStartOAuth(provider) {
   }
   _agentAdminOAuthFlow = result;
   if (result.status === 'success') {
-    _aaToast(`${result.name || result.provider} connected.`);
-    _aaFinishOAuthUi();
+    if (result.route_error) {
+      _aaRenderOAuthTerminal(true, result.route_error, true);
+    } else {
+      _aaToast(`${_aaProviderName(result.provider)} connected and ready.`);
+      _aaFinishOAuthUi();
+      if (typeof populateModelDropdown === 'function') await populateModelDropdown();
+    }
     await loadAgentAdmin();
     return;
   }
@@ -232,23 +308,23 @@ async function agentAdminStartOAuth(provider) {
   if (box) {
     box.style.display = '';
     box.innerHTML = `
-      <div style="font-size:12px;font-weight:600">Connect ${_aaEsc(result.provider)}</div>
-      <div style="margin-top:6px;font-size:12px;color:var(--muted)">
-        ${_aaEsc(result.instructions || 'Open the link, approve, then paste the code below.')}
+      <div class="agent-oauth-title">Connect ${_aaEsc(_aaProviderName(result.provider))}</div>
+      <div class="agent-oauth-step">
+        <span class="agent-oauth-step-number">1</span>
+        <div><strong>Sign in with your provider</strong><br><span>Sentry opens the provider's secure page in a new tab.</span></div>
       </div>
-      <div style="margin-top:8px">
+      <div class="agent-oauth-action">
         <a href="${_aaEsc(result.authorize_url)}" target="_blank" rel="noopener noreferrer"
-           class="btn">Open authorization page ↗</a>
+           class="btn">Open sign-in page ↗</a>
       </div>
-      <input id="agentAdminOAuthCode" placeholder="Paste the full code (looks like abc123#xyz789)"
-             style="margin-top:8px;width:100%;background:var(--input-bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:12px"
+      <div class="agent-oauth-step">
+        <span class="agent-oauth-step-number">2</span>
+        <div><strong>Paste the confirmation code</strong><br><span>Copy the complete value exactly as the provider shows it.</span></div>
+      </div>
+      <input id="agentAdminOAuthCode" class="agent-oauth-code-input" placeholder="Paste the complete confirmation code"
              autocomplete="off" spellcheck="false">
-      <div style="margin-top:4px;font-size:11px;color:var(--muted)">
-        Paste the whole value including the part after “#”. That half proves the
-        response belongs to this sign-in, and it is rejected without it.
-      </div>
-      <div style="margin-top:8px;display:flex;gap:8px">
-        <button class="btn" onclick="agentAdminCompleteOAuth()">Finish sign-in</button>
+      <div class="agent-oauth-actions">
+        <button class="btn" onclick="agentAdminCompleteOAuth()">Connect account</button>
         <button class="btn" onclick="agentAdminCancelOAuth()">Cancel</button>
       </div>`;
     const input = document.getElementById('agentAdminOAuthCode');
@@ -275,25 +351,32 @@ function _aaRenderDeviceOAuth(flow) {
   if (!box) return;
   const ready = flow.status === 'awaiting_user' && flow.authorize_url;
   const code = flow.user_code
-    ? `<div style="margin-top:10px;font-size:11px;color:var(--muted)">Authorization code</div>
-       <div style="display:flex;align-items:center;gap:8px;margin-top:3px">
-         <code style="font-size:16px;letter-spacing:.08em;padding:7px 10px;border-radius:6px;background:var(--input-bg)">${_aaEsc(flow.user_code)}</code>
+    ? `<div class="agent-oauth-code-row">
+         <code class="agent-oauth-code">${_aaEsc(flow.user_code)}</code>
          <button class="btn" onclick="agentAdminCopyOAuthCode()">Copy</button>
        </div>`
     : '';
   const action = ready
     ? `<a href="${_aaEsc(flow.authorize_url)}" target="_blank" rel="noopener noreferrer" class="btn">Open sign-in page ↗</a>`
-    : `<span style="font-size:11px;color:var(--muted)">Preparing secure sign-in…</span>`;
+    : `<span class="agent-provider-status">Preparing secure sign-in…</span>`;
   box.style.display = '';
   box.innerHTML = `
-    <div style="font-size:12px;font-weight:600">Connect ${_aaEsc(flow.provider)}</div>
-    <div style="margin-top:6px;font-size:12px;color:var(--muted)">
-      ${_aaEsc(flow.instructions || 'Preparing a secure authorization code…')}
+    <div class="agent-oauth-title">Connect ${_aaEsc(_aaProviderName(flow.provider))}</div>
+    <div class="agent-oauth-step">
+      <span class="agent-oauth-step-number">1</span>
+      <div><strong>Copy this one-time code</strong>${code}</div>
     </div>
-    ${code}
-    <div style="margin-top:10px;display:flex;gap:8px;align-items:center">
-      ${action}
-      <button class="btn" onclick="agentAdminCancelOAuth()">Cancel</button>
+    <div class="agent-oauth-step">
+      <span class="agent-oauth-step-number">2</span>
+      <div><strong>Open the provider's sign-in page</strong><div class="agent-oauth-action">${action}</div></div>
+    </div>
+    <div class="agent-oauth-step">
+      <span class="agent-oauth-step-number">3</span>
+      <div><strong>Return to Sentry</strong><br><span>Models appear automatically when sign-in finishes.</span></div>
+    </div>
+    <div class="agent-oauth-actions">
+      <span class="agent-oauth-waiting">Waiting for you to finish sign-in…</span>
+      <button class="agent-provider-disconnect" onclick="agentAdminCancelOAuth()">Cancel</button>
     </div>`;
 }
 
@@ -308,13 +391,16 @@ async function agentAdminCopyOAuthCode() {
   }
 }
 
-function _aaRenderOAuthTerminal(ok, message) {
+function _aaRenderOAuthTerminal(ok, message, warning = false) {
   const box = document.getElementById('agentAdminOAuthBox');
   if (!box) return;
   box.style.display = '';
-  box.innerHTML = `<div style="font-size:12px;font-weight:600;color:${ok ? '#2a2' : '#e05'}">${ok ? 'Connected' : 'Sign-in did not complete'}</div>
-    <div style="margin-top:6px;font-size:12px;color:var(--muted)">${_aaEsc(message)}</div>
-    ${ok ? '' : '<button class="btn" style="margin-top:8px" onclick="_aaFinishOAuthUi()">Close</button>'}`;
+  const title = warning
+    ? 'Connected, but models are not ready'
+    : (ok ? 'Connected and ready' : 'Sign-in did not complete');
+  box.innerHTML = `<div class="agent-oauth-terminal ${ok && !warning ? 'is-success' : 'is-error'}">${title}</div>
+    <div class="agent-provider-status">${_aaEsc(message)}</div>
+    ${ok && !warning ? '' : '<button class="btn agent-oauth-close" onclick="_aaFinishOAuthUi()">Close</button>'}`;
 }
 
 function _aaScheduleOAuthPoll(seconds) {
@@ -337,11 +423,19 @@ async function agentAdminPollOAuth() {
   _agentAdminOAuthFlow = Object.assign({}, flow, result);
   if (result.status === 'success') {
     _aaClearOAuthPoll();
-    _aaRenderOAuthTerminal(true, 'Credentials were stored securely by Sentry.');
-    _aaToast(`${result.provider || 'Provider'} connected.`);
+    const routeError = String(result.route_error || '').trim();
+    _aaRenderOAuthTerminal(
+      true,
+      routeError || `${(result.models || []).length} models are now ready in Sentry.`,
+      Boolean(routeError),
+    );
+    _aaToast(routeError
+      ? `${_aaProviderName(result.provider)} connected; models need attention.`
+      : `${_aaProviderName(result.provider)} connected and ready.`);
     _agentAdminOAuthFlow = null;
+    if (!routeError && typeof populateModelDropdown === 'function') await populateModelDropdown();
     await loadAgentAdmin();
-    setTimeout(_aaFinishOAuthUi, 1200);
+    if (!routeError) setTimeout(_aaFinishOAuthUi, 1200);
     return;
   }
   if (result.status === 'error' || result.status === 'cancelled') {
@@ -378,23 +472,32 @@ async function agentAdminCompleteOAuth() {
     _aaToast(`Sign-in failed: ${result.error || 'unknown error'}`);
     return;
   }
-  _aaFinishOAuthUi();
-  _aaToast(`${result.provider || 'Provider'} connected.`);
+  const routeError = String(result.route_error || '').trim();
+  if (routeError) {
+    _aaRenderOAuthTerminal(true, routeError, true);
+    _aaToast(`${_aaProviderName(result.provider)} connected; models need attention.`);
+  } else {
+    _aaFinishOAuthUi();
+    _aaToast(`${_aaProviderName(result.provider)} connected and ready.`);
+    if (typeof populateModelDropdown === 'function') await populateModelDropdown();
+  }
   await loadAgentAdmin();
 }
 
 async function agentAdminLogout(provider) {
   const ok = await _aaConfirm(
-    'Remove credentials',
-    `Stored ${provider} credentials will be removed from the agent. You can sign in again afterwards.`,
-    'Remove',
+    'Disconnect subscription',
+    `${_aaProviderName(provider)} will be signed out and its models will disappear from Sentry. You can reconnect at any time.`,
+    'Disconnect',
   );
   if (!ok) return;
   const result = await _aaFetch(`/api/agent/auth/providers/${encodeURIComponent(provider)}`, {
     method: 'DELETE', body: '{}',
   });
   if (result.available !== true) {
-    _aaToast(`Could not sign out: ${result.error || 'unknown error'}`);
+    _aaToast(`Could not disconnect: ${result.error || 'unknown error'}`);
+  } else if (typeof populateModelDropdown === 'function') {
+    await populateModelDropdown();
   }
   await loadAgentAdmin();
 }
@@ -500,6 +603,7 @@ async function loadAgentAdmin() {
     _aaFetch('/api/agent/auth/providers'),
     _aaFetch('/api/agent-messages'),
   ]);
+  _agentAdminProvidersPayload = providers;
   if (inboxEl) inboxEl.innerHTML = _aaRenderInbox(inbox);
 
   if (pendingEl) {

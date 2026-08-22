@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Sentry subscription panel QA</title>
+  <link rel="stylesheet" href="../../static/style.css">
+  <style>
+    body{margin:0;min-height:100vh;background:var(--bg);color:var(--text);font-family:var(--font-ui);}
+    .qa-shell{display:grid;grid-template-columns:minmax(300px,360px) minmax(0,1fr);width:100%;min-height:100vh;}
+    .qa-panel{padding:18px 14px;border-right:1px solid var(--border);background:var(--sidebar);}
+    .qa-heading{font-size:16px;font-weight:650;margin:0 0 4px;}
+    .qa-copy{font-size:12px;line-height:1.5;color:var(--muted);margin:0 0 12px;}
+    .qa-chat{display:flex;align-items:center;justify-content:center;padding:24px;}
+    .qa-composer{width:min(620px,100%);padding:14px;border:1px solid var(--border2);border-radius:12px;background:var(--surface);}
+    .qa-composer-label{font-size:11px;color:var(--muted);margin-bottom:5px;}
+    #qaSelection{font-size:13px;font-weight:600;overflow-wrap:anywhere;}
+    #qaToast{margin-top:7px;min-height:18px;font-size:11px;color:var(--success);}
+    @media(max-width:700px){
+      .qa-shell{display:block;}
+      .qa-panel{min-height:100vh;border-right:0;}
+      .qa-chat{position:fixed;left:12px;right:12px;bottom:12px;padding:0;}
+      .qa-composer{box-shadow:0 4px 18px rgba(0,0,0,.2);}
+    }
+  </style>
+</head>
+<body>
+  <main class="qa-shell">
+    <section class="qa-panel" aria-label="AI subscriptions">
+      <h1 class="qa-heading">Your AI subscriptions</h1>
+      <p class="qa-copy">Connect an account once, then choose any of its models here. DeepSeek stays selected until you choose another model.</p>
+      <div id="agentAdminOAuthBox" class="agent-oauth-box" style="display:none"></div>
+      <div id="agentAdminProviders"></div>
+    </section>
+    <section class="qa-chat" aria-label="Conversation model">
+      <div class="qa-composer">
+        <div class="qa-composer-label">Conversation model</div>
+        <div id="qaSelection">deepseek-v4-flash</div>
+        <div id="qaToast" role="status"></div>
+      </div>
+    </section>
+  </main>
+  <script>
+    window.S = {session: {model: 'deepseek-v4-flash', model_provider: 'sentry'}};
+    window.populateModelDropdown = async () => {};
+    window.selectModelFromDropdown = async (model, provider) => {
+      S.session.model = model;
+      S.session.model_provider = provider;
+      document.getElementById('qaSelection').textContent = model;
+    };
+    window.showToast = message => { document.getElementById('qaToast').textContent = message; };
+  </script>
+  <script src="../../static/agent_admin.js"></script>
+  <script>
+    const qaProviders = {
+      available: true,
+      providers: [
+        {
+          id: 'nous', name: 'Nous Portal', authenticated: true, browser_login: true, oauth_capable: true,
+          route_error: null, credentials: [],
+          models: [
+            {id: 'deepseek-v4-flash', model: 'deepseek/deepseek-v4-flash'},
+            {id: 'anthropic/claude-sonnet-4.6', model: 'anthropic/claude-sonnet-4.6'},
+            {id: 'openai/gpt-5.6-sol', model: 'openai/gpt-5.6-sol'},
+          ],
+        },
+        {
+          id: 'openai-codex', name: 'OpenAI Codex', authenticated: true, browser_login: true, oauth_capable: true,
+          route_error: null, credentials: [],
+          models: [
+            {id: 'chatgpt-plan/gpt-5.6-sol', model: 'gpt-5.6-sol'},
+            {id: 'chatgpt-plan/gpt-5.6-terra', model: 'gpt-5.6-terra'},
+          ],
+        },
+        {
+          id: 'xai-oauth', name: 'xAI Grok', authenticated: false, browser_login: true, oauth_capable: true,
+          credentials: [], models: [],
+        },
+        {
+          id: 'qwen-oauth', name: 'Qwen OAuth', authenticated: false, browser_login: false, oauth_capable: true,
+          unavailable_reason: 'Qwen OAuth is no longer offered for new connections.',
+          credentials: [], models: [],
+        },
+      ],
+    };
+    _agentAdminProvidersPayload = qaProviders;
+    document.getElementById('agentAdminProviders').innerHTML = _aaRenderProviders(qaProviders);
+    if (new URLSearchParams(location.search).get('oauth') === 'device') {
+      _agentAdminOAuthFlow = {
+        flow_id: 'qa-flow', flow_kind: 'device', provider: 'openai-codex',
+        status: 'awaiting_user', authorize_url: '#provider-sign-in', user_code: 'ABCD-EFGH',
+      };
+      _aaRenderDeviceOAuth(_agentAdminOAuthFlow);
+    }
+  </script>
+</body>
+</html>
