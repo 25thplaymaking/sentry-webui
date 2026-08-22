@@ -31,6 +31,15 @@ def test_new_session_request_experience_validation_is_strict():
         raise AssertionError("unknown experience must be refused")
 
 
+def test_hidden_child_sessions_cannot_upgrade_chat_to_work():
+    source = (ROOT / "api" / "routes.py").read_text(encoding="utf-8")
+    btw = source[source.index("def _handle_btw("):source.index("def _handle_background(")]
+    background = source[source.index("def _handle_background("):source.index("def _checkpoint_user_message_for_eager_session_save(")]
+    inheritance = "experience=getattr(s, 'experience', 'work')"
+    assert inheritance in btw
+    assert inheritance in background
+
+
 def test_ui_has_first_class_chat_work_switch_and_no_subscription_picker_duplicate():
     html = (ROOT / "static" / "index.html").read_text(encoding="utf-8")
     ui = (ROOT / "static" / "ui.js").read_text(encoding="utf-8")

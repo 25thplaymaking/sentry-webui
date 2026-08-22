@@ -23106,6 +23106,7 @@ def _handle_btw(handler, body):
         model=s.model,
         model_provider=model_provider,
         profile=getattr(s, 'profile', None),
+        experience=getattr(s, 'experience', 'work'),
     )
     # Copy conversation history for context (agent reads from messages)
     ephemeral.messages = list(s.messages or [])
@@ -23159,6 +23160,7 @@ def _handle_background(handler, body):
         model=s.model,
         model_provider=model_provider,
         profile=getattr(s, 'profile', None),
+        experience=getattr(s, 'experience', 'work'),
     )
     bg.title = f"bg: {prompt[:60]}"
     bg.save()
