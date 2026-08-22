@@ -345,6 +345,9 @@ function snapshot(dd) {
         ariaCurrent: child['aria-current'] || '',
         tabIndex: child.tabIndex,
         dataset: {...(child.dataset || {})},
+        parentGroup: child.parentElement && child.parentElement.dataset
+          ? child.parentElement.dataset.group || ''
+          : '',
       });
       if (child.children && child.children.length) walk(child);
     }
@@ -1551,6 +1554,9 @@ def test_runtime_picker_prioritizes_native_models_and_opens_only_selected_nous_v
     }
     assert subgroup_bodies["nous::deepseek"]["display"] == ""
     assert subgroup_bodies["nous::openai"]["display"] == "none"
+
+    selected_rows = [item for item in out["initial"] if "active" in item["className"].split()]
+    assert selected_rows[0]["parentGroup"] == "nous::deepseek"
 
     assert out["keyboardSubgroup"]["ariaExpanded"] == "true"
     assert out["keyboardModel"] == {

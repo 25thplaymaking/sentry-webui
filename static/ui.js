@@ -4842,7 +4842,8 @@ function renderModelDropdown(){
         if(useSubGroups){
           const byPrefix=new Map();
           for(const m of groupRows){
-            const pfx=_vendorPrefix(m.value)||'other';
+            const pfx=_vendorPrefix(m.value)
+              ||(m===_selectedCatalogEntry&&_selectedVendorPrefix?_selectedVendorPrefix:'other');
             if(!byPrefix.has(pfx)) byPrefix.set(pfx,[]);
             byPrefix.get(pfx).push(m);
           }
