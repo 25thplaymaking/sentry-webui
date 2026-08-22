@@ -65,3 +65,8 @@ def test_escape_returns_focus_to_the_visible_mobile_model_trigger():
     assert "trigger.focus({preventScroll:true})" in UI
     assert "modelDropdown.classList.contains('open')" in UI
     assert "modelAction.focus({preventScroll:true})" in UI
+
+
+def test_desktop_picker_focuses_search_after_becoming_visible():
+    assert "dd.classList.add('open')" in UI
+    assert "if(input&&dd.classList.contains('open')) input.focus({preventScroll:true})" in UI

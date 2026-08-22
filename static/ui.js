@@ -5054,6 +5054,13 @@ async function toggleModelDropdown(){
   renderModelDropdown({triggerId});
   dd.classList.add('open');
   dd.setAttribute('aria-hidden','false');
+  const coarsePointer=(typeof window.matchMedia==='function')&&window.matchMedia('(pointer: coarse)').matches;
+  if(!coarsePointer){
+    setTimeout(()=>{
+      const input=dd.querySelector('.model-search-input');
+      if(input&&dd.classList.contains('open')) input.focus({preventScroll:true});
+    },0);
+  }
   _positionModelDropdown();
   const activeRow=dd.querySelector('.model-opt.active');
   if(activeRow&&typeof activeRow.scrollIntoView==='function') activeRow.scrollIntoView({block:'nearest'});
