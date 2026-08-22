@@ -58,6 +58,18 @@ def test_picker_disclosures_and_rows_are_keyboard_operable():
     assert ".model-opt:focus-visible" in CSS
 
 
+def test_model_badges_use_theme_tokens_in_light_and_dark_modes():
+    for selector, token in (
+        (".model-opt-badge--primary", "var(--success)"),
+        (".model-opt-badge--fallback", "var(--warning)"),
+        (".model-opt-badge--selected", "var(--info)"),
+        (".model-opt-badge--native", "var(--success)"),
+    ):
+        start = CSS.index(selector)
+        rule = CSS[start : CSS.index("}", start)]
+        assert token in rule
+
+
 def test_escape_returns_focus_to_the_visible_mobile_model_trigger():
     assert "mobilePanel.classList.contains('open')" in UI
     assert "?'composerMobileModelAction'" in UI
