@@ -379,15 +379,6 @@ function syncWorkspacePanelUI(){
     edgeToggleBtn.setAttribute('aria-label', label);
     edgeToggleBtn.disabled=!canBrowse;
   }
-  const sentryInspectorToggle=$('sentryInspectorToggle');
-  if(sentryInspectorToggle){
-    sentryInspectorToggle.classList.toggle('active',isOpen);
-    sentryInspectorToggle.setAttribute('aria-expanded',isOpen?'true':'false');
-    const label=isOpen?'Hide changes, GitHub, and integrations':'Show changes, GitHub, and integrations';
-    _setButtonTooltip(sentryInspectorToggle,label);
-    sentryInspectorToggle.setAttribute('aria-label',label);
-    sentryInspectorToggle.disabled=!canBrowse;
-  }
   if(collapseBtn){
     _setButtonTooltip(collapseBtn, isCompact?_uiText('workspace_panel_close','Close workspace panel'):_uiText('workspace_panel_hide','Hide workspace panel'));
   }
@@ -403,6 +394,15 @@ function syncWorkspacePanelUI(){
     _setButtonTooltip(clearBtn, label);
     clearBtn.setAttribute('aria-label', label);
     if(!isCompact) clearBtn.style.display='';
+  }
+  const sentryInspectorToggle=$('sentryInspectorToggle');
+  if(sentryInspectorToggle){
+    sentryInspectorToggle.classList.toggle('active',isOpen);
+    sentryInspectorToggle.setAttribute('aria-expanded',isOpen?'true':'false');
+    const label=isOpen?'Hide changes, GitHub, and integrations':'Show changes, GitHub, and integrations';
+    _setButtonTooltip(sentryInspectorToggle,label);
+    sentryInspectorToggle.setAttribute('aria-label',label);
+    sentryInspectorToggle.disabled=!canBrowse;
   }
 }
 
