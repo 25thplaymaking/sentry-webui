@@ -73,6 +73,10 @@ class TestEnvelopeShape:
             "available": True,
             "workspaces": [{"id": "server-work", "modes": ["readOnly", "workspaceWrite"]}],
             "features": ["threads", "skills", "apps", "mcp", "sandbox"],
+            "inventory": {
+                "skills": [{"name": "openai-docs", "enabled": True}],
+                "plugins": [{"name": "ui-ux-pro-max", "enabled": True}],
+            },
         }
         env = routes._sentry_models_envelope(
             ["chatgpt-plan/gpt-5.6-sol"],
@@ -94,6 +98,7 @@ class TestEnvelopeShape:
         assert group["models"][0]["native_runtime"] == "codex"
         assert group["models"][0]["experience"] == "work"
         assert env["native_runtimes"] == [runtime]
+        assert env["native_runtimes"][0]["inventory"]["skills"][0]["name"] == "openai-docs"
 
     def test_aliases_are_used_verbatim(self):
         """No relabeling: the operator's configured alias is what gets picked."""

@@ -10787,6 +10787,35 @@ def _sentry_cron_last_run_entry(g: dict) -> list[dict]:
     }]
 
 
+def _sentry_activity_lines(actions) -> list[str]:
+    """Render a bounded activity allowlist; never forward prompts or arguments."""
+
+    def clean(value, limit: int) -> str:
+        text = re.sub(r"[\r\n\t]+", " ", str(value or "")).strip()
+        return _redact_text(text[:limit], _enabled=True)
+
+    lines: list[str] = []
+    for action in reversed(actions if isinstance(actions, list) else []):
+        if not isinstance(action, dict):
+            continue
+        parts = [
+            clean(action.get("occurred_at"), 80),
+            clean(action.get("status") or "activity", 40).upper(),
+            clean(action.get("kind") or "action", 80),
+        ]
+        model = clean(action.get("model"), 160)
+        tool = clean(action.get("tool_name"), 160)
+        preview = clean(action.get("result_preview"), 500)
+        if model:
+            parts.append(f"model={model}")
+        if tool:
+            parts.append(f"tool={tool}")
+        if preview:
+            parts.append(preview)
+        lines.append(" · ".join(part for part in parts if part))
+    return lines
+
+
 def _sentry_terminal_refused(handler):
     """403 the embedded terminal under the sentry dialect, all verbs.
 
@@ -10810,21 +10839,18 @@ def _sentry_terminal_refused(handler):
 
 
 def _sentry_kanban_unavailable(handler):
-    """501 every kanban route the Gateway does not implement, on all verbs.
+    """Refuse legacy local-board endpoints under the Sentry dialect.
 
-    Only /api/kanban/board exists on the Gateway. The rest of the board is
-    served by kanban_bridge, which imports hermes_cli -- a package this
-    container does not ship, because it never loads the agent. That surfaced
-    as a raw ModuleNotFoundError in the UI (and a raw 500 on every POST/PATCH/
-    DELETE, e.g. any card drag), which reads as a broken deployment rather
-    than an absent feature. Say what is actually true instead.
+    Sentry's board is the Gateway work-order state machine. Only its explicit
+    board, create, detail, and transition routes are proxied; local multi-board,
+    filesystem and dispatcher endpoints remain out of scope because they would
+    mutate this shared WebUI container instead of the caller's work orders.
     """
     return j(handler, {
         "error": "Kanban is not available in this deployment.",
         "detail": (
-            "Board data is served by the Sentry Gateway, which currently "
-            "implements only /api/kanban/board. The remaining endpoints "
-            "need agent-local state this container does not have."
+            "This control belongs to the local Hermes board and is not part "
+            "of Sentry's work-order board."
         ),
         "kanban_unavailable": True,
     }, status=501)
@@ -13170,17 +13196,29 @@ def handle_get(handler, parsed) -> bool:
 
     if parsed.path.startswith("/api/kanban/"):
         from api.gateway_chat import _gateway_dialect, sentry_access_token_from_handler
-        if _gateway_dialect() == "sentry" and parsed.path == "/api/kanban/board":
-            _tok = sentry_access_token_from_handler(handler)
-            if _tok:
-                from api.sentry_gateway_client import SentryGatewayError, get_json
-                try:
-                    return j(handler, get_json("/api/kanban/board", _tok) or {"tasks": [], "columns": []})
-                except SentryGatewayError:
-                    return j(handler, {"tasks": [], "columns": [], "unavailable": True})
-            return _sentry_no_identity(handler)
         if _gateway_dialect() == "sentry":
-            return _sentry_kanban_unavailable(handler)
+            _tok = sentry_access_token_from_handler(handler)
+            if not _tok:
+                return _sentry_no_identity(handler)
+            from api.sentry_gateway_client import SentryGatewayError, get_json
+            _target = None
+            if parsed.path == "/api/kanban/board":
+                _target = "/api/kanban/board"
+            else:
+                _match = re.fullmatch(r"/api/kanban/tasks/([0-9a-fA-F-]{36})", parsed.path)
+                if _match:
+                    _target = f"/api/kanban/tasks/{_match.group(1)}"
+            if not _target:
+                return _sentry_kanban_unavailable(handler)
+            try:
+                return j(handler, get_json(_target, _tok) or {})
+            except SentryGatewayError as exc:
+                if parsed.path == "/api/kanban/board":
+                    return j(handler, {
+                        "backend": "sentry-workorders", "tasks": [], "columns": [],
+                        "unavailable": True, "error": str(exc),
+                    })
+                return bad(handler, str(exc), status=getattr(exc, "status", None) or 502)
         from api.kanban_bridge import handle_kanban_get
 
         # Only treat an explicit False as "no route matched". None means the
@@ -13279,6 +13317,34 @@ def handle_get(handler, parsed) -> bool:
             return bad(handler, "Could not read page", status=404)
         return j(handler, {"content": content, "path": page_path})
     if parsed.path == "/api/logs":
+        from api.gateway_chat import _gateway_dialect, sentry_access_token_from_handler
+        if _gateway_dialect() == "sentry":
+            _tok = sentry_access_token_from_handler(handler)
+            if not _tok:
+                return _sentry_no_identity(handler)
+            from api.sentry_gateway_client import SentryGatewayError, get_json
+            _tail = _normalize_logs_tail(parse_qs(parsed.query).get("tail", [None])[0])
+            try:
+                _payload = get_json(f"/api/chat/actions?limit={_tail}", _tok) or {}
+                _actions = _payload.get("actions") if isinstance(_payload, dict) else []
+                _actions = _actions if isinstance(_actions, list) else []
+                _lines = _sentry_activity_lines(_actions)
+                _joined = "\n".join(_lines)
+                return j(handler, {
+                    "file": "activity", "tail": _tail, "lines": _lines,
+                    "truncated": len(_actions) >= _tail,
+                    "total_bytes": len(_joined.encode("utf-8")),
+                    "mtime": time.time() if _lines else None,
+                    "hint": "Profile-scoped Sentry activity. Prompts and command arguments are not shown.",
+                    "backend": "sentry-actions",
+                })
+            except SentryGatewayError as exc:
+                return j(handler, {
+                    "file": "activity", "tail": _tail, "lines": [],
+                    "truncated": False, "total_bytes": 0, "mtime": None,
+                    "hint": "Sentry activity is temporarily unavailable.",
+                    "unavailable": True, "error": str(exc),
+                })
         return _handle_logs(handler, parsed)
 
     if parsed.path == "/health":
@@ -14699,11 +14765,18 @@ def handle_get(handler, parsed) -> bool:
                     skills = [
                         {
                             "name": s.get("name"),
-                            "description": f"state: {s.get('state')}",
-                            "enabled": s.get("state") == "active",
+                            "description": s.get("description") or "",
+                            "enabled": bool(s.get("enabled", s.get("state") == "active")),
                             "state": s.get("state"),
                             "content_hash": s.get("content_hash"),
                             "created_at": s.get("created_at"),
+                            "source": s.get("source") or "sentry",
+                            "scope": s.get("scope"),
+                            "category": (
+                                "Codex installation"
+                                if s.get("source") == "codex"
+                                else "Sentry governed"
+                            ),
                         }
                         for s in gw if isinstance(s, dict)
                     ]
@@ -15166,6 +15239,40 @@ def _validate_native_workspace_id(value):
     return workspace_id
 
 
+def _validate_native_runtime_options(value):
+    """Validate the small signed Codex control surface stored with a session."""
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise ValueError("native_runtime_options must be an object")
+    allowed = {
+        "action": {"turn", "review"},
+        "collaboration_mode": {"default", "plan"},
+        "effort": {None, "minimal", "low", "medium", "high", "xhigh", "max", "ultra"},
+        "personality": {"none", "friendly", "pragmatic"},
+        "approval_policy": {"on-request", "untrusted"},
+        "sandbox": {"readOnly", "workspaceWrite"},
+        "review_target": {"uncommittedChanges"},
+    }
+    defaults = {
+        "action": "turn",
+        "collaboration_mode": "default",
+        "effort": None,
+        "personality": "pragmatic",
+        "approval_policy": "on-request",
+        "sandbox": "workspaceWrite",
+        "review_target": "uncommittedChanges",
+    }
+    unknown = set(value) - set(allowed)
+    if unknown:
+        raise ValueError("native_runtime_options contains unsupported controls")
+    result = {**defaults, **value}
+    for key, values in allowed.items():
+        if result[key] not in values:
+            raise ValueError(f"native_runtime_options.{key} is not supported")
+    return result
+
+
 def _resolve_new_session_workspace(body, visible_prev_session_id):
     """Resolve a new-session workspace, recovering only verified inheritance."""
     candidate = body.get("workspace")
@@ -15430,9 +15537,38 @@ def handle_post(handler, parsed) -> bool:
         return j(handler, result, status=200 if result.get("clean") else 409)
 
     if parsed.path.startswith("/api/kanban/"):
-        from api.gateway_chat import _gateway_dialect
+        from api.gateway_chat import _gateway_dialect, sentry_access_token_from_handler
         if _gateway_dialect() == "sentry":
-            return _sentry_kanban_unavailable(handler)
+            _tok = sentry_access_token_from_handler(handler)
+            if not _tok:
+                return _sentry_no_identity(handler)
+            from api.sentry_gateway_client import SentryGatewayError, post_json
+            _target = None
+            _payload = None
+            if parsed.path == "/api/kanban/tasks":
+                _target = "/api/kanban/tasks"
+                _payload = {
+                    "title": str(body.get("title") or "").strip(),
+                    "body": str(body.get("body") or body.get("description") or ""),
+                    "mode": str(body.get("mode") or "readOnly"),
+                }
+            else:
+                _match = re.fullmatch(
+                    r"/api/kanban/tasks/([0-9a-fA-F-]{36})/transition", parsed.path
+                )
+                if _match:
+                    _target = f"/api/kanban/tasks/{_match.group(1)}/transition"
+                    _payload = {
+                        "target": str(body.get("target") or "").strip(),
+                        "reason": body.get("reason"),
+                    }
+            if not _target:
+                return _sentry_kanban_unavailable(handler)
+            try:
+                _result = post_json(_target, _tok, _payload or {}) or {}
+                return j(handler, _result, status=201 if parsed.path == "/api/kanban/tasks" else 200)
+            except SentryGatewayError as exc:
+                return bad(handler, str(exc), status=getattr(exc, "status", None) or 502)
         from api.kanban_bridge import handle_kanban_post
 
         result = handle_kanban_post(handler, parsed, body)
@@ -15559,6 +15695,9 @@ def handle_post(handler, parsed) -> bool:
             experience = _validate_session_experience(body.get("experience"))
             native_workspace_id = _validate_native_workspace_id(
                 body.get("native_workspace_id")
+            )
+            native_runtime_options = _validate_native_runtime_options(
+                body.get("native_runtime_options")
             )
         except ValueError as e:
             return bad(handler, str(e), status=400)
@@ -15687,6 +15826,7 @@ def handle_post(handler, parsed) -> bool:
             enabled_toolsets=enabled_toolsets,
             experience=experience,
             native_workspace_id=native_workspace_id,
+            native_runtime_options=native_runtime_options,
         )
         if worktree_info:
             publish_session_list_changed(
@@ -16206,6 +16346,12 @@ def handle_post(handler, parsed) -> bool:
             native_workspace_id = _validate_native_workspace_id(
                 body.get("native_workspace_id", existing_native_workspace_id)
             )
+            native_runtime_options = _validate_native_runtime_options(
+                body.get(
+                    "native_runtime_options",
+                    getattr(s, "native_runtime_options", {}),
+                )
+            )
         except ValueError as e:
             return bad(handler, str(e), status=400)
         try:
@@ -16215,6 +16361,7 @@ def handle_post(handler, parsed) -> bool:
         with _get_session_agent_lock(body["session_id"]):
             s.workspace = new_ws
             s.native_workspace_id = native_workspace_id
+            s.native_runtime_options = native_runtime_options
             if "model" in body or "model_provider" in body:
                 model, provider = _session_model_state_from_request(
                     body.get("model", s.model),

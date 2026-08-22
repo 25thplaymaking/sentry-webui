@@ -589,6 +589,41 @@ def _translate_sentry_event(payload) -> list[tuple[str, dict]]:
         # whole chain existed and the last step threw it away.
         evidence = payload.get("evidence")
         evidence = evidence if isinstance(evidence, dict) else {}
+        native_method = str(evidence.get("native_method") or "")
+        native_frame = evidence.get("native")
+        native_frame = native_frame if isinstance(native_frame, dict) else {}
+        if native_method == "turn/plan/updated":
+            params = native_frame.get("params")
+            params = params if isinstance(params, dict) else {}
+            plan = params.get("plan")
+            if isinstance(plan, list):
+                statuses = {
+                    "inProgress": "in_progress",
+                    "in_progress": "in_progress",
+                    "completed": "completed",
+                    "cancelled": "cancelled",
+                    "pending": "pending",
+                }
+                todos = []
+                for index, item in enumerate(plan):
+                    if not isinstance(item, dict):
+                        continue
+                    content = str(item.get("step") or item.get("content") or "").strip()
+                    if not content:
+                        continue
+                    raw_status = str(item.get("status") or "pending")
+                    todos.append({
+                        "id": str(item.get("id") or f"codex-plan-{index + 1}"),
+                        "content": content,
+                        "status": statuses.get(raw_status, "pending"),
+                    })
+                return [("todo_state", {
+                    "session_id": str(payload.get("sessionId") or ""),
+                    "todos": todos,
+                    "source": "codex-plan",
+                    "version": 1,
+                    "ts": time.time(),
+                })]
         name = ""
         for key in ("tool", "name", "function_name"):
             candidate = evidence.get(key)
@@ -770,6 +805,7 @@ def _run_sentry_turn_streaming(
     model=None,
     experience="work",
     workspace_id=None,
+    native_options=None,
 ):
     """Bridge one WebUI turn through the Sentry Gateway ``/api/chat/turn``.
 
@@ -802,6 +838,8 @@ def _run_sentry_turn_streaming(
         body["model"] = str(model)
     if workspace_id:
         body["workspace_id"] = str(workspace_id)
+    if native_options:
+        body["native_options"] = dict(native_options)
     req = urllib.request.Request(
         url, data=json.dumps(body).encode("utf-8"), headers=headers, method="POST"
     )
@@ -1655,6 +1693,7 @@ def _run_gateway_chat_streaming(
                     model=model,
                     experience=getattr(s, "experience", "work"),
                     workspace_id=getattr(s, "native_workspace_id", None),
+                    native_options=getattr(s, "native_runtime_options", None),
                 )
             except Exception as exc:
                 error_payload = _settle_gateway_terminal_error(

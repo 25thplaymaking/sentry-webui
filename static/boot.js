@@ -2267,6 +2267,9 @@ $('modelSelect').onchange=async()=>{
   const nativeWorkspaceId=(nativeRuntime&&typeof _nativeWorkspaceIdForNextTurn==='function')
     ? _nativeWorkspaceIdForNextTurn(nativeRuntime)
     : null;
+  const nativeRuntimeOptions=(nativeRuntime&&typeof _currentNativeRuntimeOptions==='function')
+    ?_currentNativeRuntimeOptions(nativeRuntime)
+    :null;
   if(typeof clearProfileTransitionReasoningContext==='function') clearProfileTransitionReasoningContext();
   if(typeof closeModelDropdown==='function') closeModelDropdown();
   if(typeof _writePersistedModelState==='function') _writePersistedModelState(modelState.model,modelState.model_provider);
@@ -2275,6 +2278,9 @@ $('modelSelect').onchange=async()=>{
     if(nativeRuntimeId){
       S._pendingExperience='work';
       S._pendingNativeWorkspaceId=nativeWorkspaceId||null;
+      S._pendingNativeRuntimeOptions=nativeRuntimeOptions||null;
+    }else{
+      S._pendingNativeRuntimeOptions=null;
     }
     if(typeof _rememberEmptyComposerModelOverride==='function') _rememberEmptyComposerModelOverride(modelState.model,modelState.model_provider);
     if(typeof syncModelChip==='function') syncModelChip();
@@ -2291,6 +2297,7 @@ $('modelSelect').onchange=async()=>{
       model:modelState.model,
       model_provider:modelState.model_provider||null,
       native_workspace_id:nativeWorkspaceId||null,
+      native_runtime_options:nativeRuntimeOptions||null,
     });
     if(typeof showToast==='function') showToast('Codex models open in Work with native features from your machine.',3200);
     return;
@@ -2303,6 +2310,11 @@ $('modelSelect').onchange=async()=>{
     S._pendingNativeWorkspaceId=nativeWorkspaceId||null;
     S.session.experience='work';
     S.session.native_workspace_id=nativeWorkspaceId||null;
+    S.session.native_runtime_options=nativeRuntimeOptions||{};
+    S._pendingNativeRuntimeOptions=nativeRuntimeOptions||null;
+  }else{
+    S.session.native_runtime_options={};
+    S._pendingNativeRuntimeOptions=null;
   }
   if(typeof syncModelChip==='function') syncModelChip();
   if(typeof syncReasoningChip==='function') syncReasoningChip();
@@ -2317,6 +2329,7 @@ $('modelSelect').onchange=async()=>{
     model:modelState.model,
     model_provider:modelState.model_provider||null,
     native_workspace_id:nativeRuntimeId?(nativeWorkspaceId||null):(S.session.native_workspace_id||null),
+    native_runtime_options:nativeRuntimeId?(nativeRuntimeOptions||{}):null,
   })});
   // NOTE: do NOT clear the pending explicit-pick marker here. It must survive until
   // the NEXT send() consumes it, otherwise the normal "pick → session-update → send"

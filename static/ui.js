@@ -2907,6 +2907,13 @@ function renderProviderQuotaIndicator(status){
   const mobileAction=$('composerMobileQuotaAction');
   const mobileLabel=$('composerMobileQuotaLabel');
   if(!chip||!label) return;
+  if(document.body&&document.body.dataset.sentryProduct==='true'){
+    chip.hidden=true;
+    label.textContent='';
+    if(mobileAction) mobileAction.style.display='none';
+    if(mobileLabel) mobileLabel.textContent='';
+    return;
+  }
   // Hide entirely when the user has disabled the ambient quota chip in Settings.
   // Boot defaults this on; an explicit false preference suppresses it.
   if(window._showQuotaChip!==true){
@@ -2933,6 +2940,10 @@ function renderProviderQuotaIndicator(status){
   if(mobileLabel) mobileLabel.textContent=text.label;
 }
 async function refreshProviderQuotaIndicator(){
+  if(document.body&&document.body.dataset.sentryProduct==='true'){
+    renderProviderQuotaIndicator(null);
+    return;
+  }
   // Short-circuit before the fetch when the chip is disabled — no point asking
   // the server for quota data the UI will throw away.
   if(window._showQuotaChip!==true){
@@ -11240,6 +11251,14 @@ function _nativeRuntimeById(id){
   return (Array.isArray(window._nativeRuntimes)?window._nativeRuntimes:[])
     .find(runtime=>runtime&&String(runtime.id||'')===String(id||''))||null;
 }
+function _nativeSelectedModelId(){
+  const select=$('modelSelect');
+  if(!select) return '';
+  const state=typeof _modelStateForSelect==='function'
+    ?_modelStateForSelect(select,select.value)
+    :{model:select.value};
+  return String((state&&state.model)||select.value||'').replace(/^chatgpt-plan\//,'');
+}
 function _nativeWorkspaceIdForNextTurn(runtime){
   const workspaces=runtime&&Array.isArray(runtime.workspaces)?runtime.workspaces:[];
   const available=new Set(workspaces.map(item=>String((item&&item.id)||'')).filter(Boolean));
@@ -11250,6 +11269,68 @@ function _nativeWorkspaceIdForNextTurn(runtime){
   ).trim();
   if(requested&&available.has(requested)) return requested;
   return workspaces.length?String(workspaces[0].id||''):'';
+}
+function _nativeModelInventory(runtime){
+  const inventory=runtime&&runtime.inventory&&typeof runtime.inventory==='object'
+    ?runtime.inventory:{};
+  const models=Array.isArray(inventory.models)?inventory.models:[];
+  const selected=_nativeSelectedModelId();
+  return models.find(item=>item&&String(item.id||'')===selected)||null;
+}
+function _nativeWorkspace(runtime,workspaceId){
+  const workspaces=runtime&&Array.isArray(runtime.workspaces)?runtime.workspaces:[];
+  return workspaces.find(item=>item&&String(item.id||'')===String(workspaceId||''))||null;
+}
+function _nativeRuntimeDefaults(runtime){
+  const workspaceId=_nativeWorkspaceIdForNextTurn(runtime);
+  const workspace=_nativeWorkspace(runtime,workspaceId);
+  const modes=workspace&&Array.isArray(workspace.modes)?workspace.modes:[];
+  const model=_nativeModelInventory(runtime);
+  return {
+    action:'turn',
+    collaboration_mode:'default',
+    effort:(model&&model.default_effort)||null,
+    personality:'pragmatic',
+    approval_policy:'on-request',
+    sandbox:modes.includes('workspaceWrite')?'workspaceWrite':'readOnly',
+    review_target:'uncommittedChanges',
+  };
+}
+function _currentNativeRuntimeOptions(runtime){
+  const source=(S.session&&S.session.native_runtime_options&&typeof S.session.native_runtime_options==='object')
+    ?S.session.native_runtime_options
+    :((S._pendingNativeRuntimeOptions&&typeof S._pendingNativeRuntimeOptions==='object')?S._pendingNativeRuntimeOptions:{});
+  const result={..._nativeRuntimeDefaults(runtime),...source};
+  const model=_nativeModelInventory(runtime);
+  const efforts=model&&Array.isArray(model.reasoning_efforts)?model.reasoning_efforts:[];
+  if(result.effort&&!efforts.includes(result.effort)) result.effort=(model&&model.default_effort)||null;
+  const workspace=_nativeWorkspace(runtime,_nativeWorkspaceIdForNextTurn(runtime));
+  const modes=workspace&&Array.isArray(workspace.modes)?workspace.modes:[];
+  if(result.sandbox==='workspaceWrite'&&!modes.includes('workspaceWrite')) result.sandbox='readOnly';
+  if(result.sandbox==='readOnly'&&!modes.includes('readOnly')&&modes.includes('workspaceWrite')) result.sandbox='workspaceWrite';
+  if(model&&model.supports_personality===false) result.personality='none';
+  return result;
+}
+async function _persistNativeRuntimeOptions(options){
+  S._pendingNativeRuntimeOptions={...options};
+  if(!S.session) return;
+  const previous=(S.session.native_runtime_options&&typeof S.session.native_runtime_options==='object')
+    ?S.session.native_runtime_options:{};
+  S.session.native_runtime_options={...options};
+  try{
+    const data=await api('/api/session/update',{method:'POST',body:JSON.stringify({
+      session_id:S.session.session_id,
+      workspace:S.session.workspace,
+      native_workspace_id:S.session.native_workspace_id||S._pendingNativeWorkspaceId||null,
+      native_runtime_options:options,
+    })});
+    _applySessionContextMetadataUpdate(data);
+  }catch(error){
+    S.session.native_runtime_options=previous;
+    S._pendingNativeRuntimeOptions={...previous};
+    syncNativeRuntimeBar();
+    throw error;
+  }
 }
 function _setNativeRuntimeFeaturesOpen(open){
   const panel=$('nativeRuntimeFeatures');
@@ -11281,6 +11362,88 @@ document.addEventListener('keydown',event=>{
   const button=$('nativeRuntimeFeaturesBtn');
   if(button&&typeof button.focus==='function') button.focus({preventScroll:true});
 });
+function _nativeInventoryLabel(kind,item){
+  if(!item||typeof item!=='object') return '';
+  if(kind==='hooks') return String(item.event_name||item.key||'');
+  return String(item.name||item.title||item.display_name||item.id||'');
+}
+function _nativeInventoryDescription(kind,item){
+  if(!item||typeof item!=='object') return '';
+  if(kind==='mcp_servers'){
+    const tools=Array.isArray(item.tools)?item.tools.length:0;
+    return [item.description,item.auth_status,tools?`${tools} tool${tools===1?'':'s'}`:''].filter(Boolean).join(' · ');
+  }
+  if(kind==='hooks') return [item.handler_type,item.trust_status,item.status_message].filter(Boolean).join(' · ');
+  return String(item.short_description||item.description||item.version||'');
+}
+function _appendNativeInventorySection(container,title,kind,items){
+  if(!Array.isArray(items)||!items.length) return 0;
+  const section=document.createElement('section');
+  section.className='native-inventory-section';
+  const heading=document.createElement('div');
+  heading.className='native-inventory-heading';
+  heading.textContent=`${title} (${items.length})`;
+  section.appendChild(heading);
+  const list=document.createElement('div');
+  list.className='native-inventory-list';
+  for(const item of items){
+    const label=_nativeInventoryLabel(kind,item);
+    if(!label) continue;
+    const row=document.createElement('div');
+    row.className='native-inventory-row';
+    const copy=document.createElement('div');
+    copy.className='native-inventory-copy';
+    const name=document.createElement('strong');
+    name.textContent=label;
+    copy.appendChild(name);
+    const description=_nativeInventoryDescription(kind,item);
+    if(description){
+      const meta=document.createElement('span');
+      meta.textContent=description;
+      copy.appendChild(meta);
+    }
+    row.appendChild(copy);
+    if(Object.prototype.hasOwnProperty.call(item,'enabled')||Object.prototype.hasOwnProperty.call(item,'accessible')){
+      const active=item.enabled!==false&&item.accessible!==false;
+      const state=document.createElement('span');
+      state.className=`native-inventory-state ${active?'is-active':'is-inactive'}`;
+      state.textContent=active?'Active':'Unavailable';
+      row.appendChild(state);
+    }
+    list.appendChild(row);
+  }
+  section.appendChild(list);
+  container.appendChild(section);
+  return items.length;
+}
+function _renderNativeRuntimeInventory(runtime){
+  const panel=$('nativeRuntimeFeatures');
+  if(!panel) return;
+  panel.innerHTML='';
+  const intro=document.createElement('div');
+  intro.className='native-runtime-boundary';
+  intro.textContent='Loaded from the Codex installation on your linked machine. These are the tools and extensions Codex can actually see for this workspace.';
+  panel.appendChild(intro);
+  const inventory=runtime&&runtime.inventory&&typeof runtime.inventory==='object'?runtime.inventory:{};
+  let total=0;
+  total+=_appendNativeInventorySection(panel,'Skills','skills',inventory.skills);
+  total+=_appendNativeInventorySection(panel,'Apps','apps',inventory.apps);
+  total+=_appendNativeInventorySection(panel,'MCP servers','mcp_servers',inventory.mcp_servers);
+  total+=_appendNativeInventorySection(panel,'Plugins','plugins',inventory.plugins);
+  total+=_appendNativeInventorySection(panel,'Hooks','hooks',inventory.hooks);
+  const core=Array.isArray(runtime&&runtime.features)?runtime.features:[];
+  total+=_appendNativeInventorySection(panel,'Runtime features','features',core.map(name=>({name:String(name).replace(/-/g,' '),enabled:true})));
+  if(!total){
+    const empty=document.createElement('div');
+    empty.className='native-inventory-empty';
+    empty.textContent=runtime&&runtime.available
+      ?'Codex is connected, but no optional skills, apps, plugins, hooks, or MCP servers were reported.'
+      :'Connect the workstation to load its Codex inventory.';
+    panel.appendChild(empty);
+  }
+  const count=$('nativeRuntimeInventoryCount');
+  if(count) count.textContent=total?String(total):'';
+}
 function syncNativeRuntimeBar(){
   const bar=$('nativeRuntimeBar');
   const select=$('nativeWorkspaceSelect');
@@ -11291,7 +11454,7 @@ function syncNativeRuntimeBar(){
     _setNativeRuntimeFeaturesOpen(false);
     return;
   }
-  const runtime=_nativeRuntimeById(runtimeId)||{id:runtimeId,available:false,workspaces:[],features:[],reason:'This native runtime is not connected.'};
+  const runtime=_nativeRuntimeById(runtimeId)||{id:runtimeId,available:false,workspaces:[],features:[],inventory:{},reason:'This native runtime is not connected.'};
   bar.hidden=false;
   bar.classList.toggle('is-offline',!runtime.available);
   const status=$('nativeRuntimeStatus');
@@ -11317,36 +11480,94 @@ function syncNativeRuntimeBar(){
   }
   select.value=workspaceId;
   select.disabled=!runtime.available||!workspaceId;
-
-  const features=$('nativeRuntimeFeatures');
-  if(features){
-    features.innerHTML='';
-    const heading=document.createElement('div');
-    heading.className='native-runtime-feature-heading';
-    heading.textContent='Active from your Codex installation';
-    features.appendChild(heading);
-    const list=document.createElement('div');
-    list.className='native-runtime-feature-list';
-    for(const feature of (Array.isArray(runtime.features)?runtime.features:[])){
-      const chip=document.createElement('span');
-      chip.className='native-runtime-feature';
-      chip.textContent=String(feature).replace(/-/g,' ');
-      list.appendChild(chip);
+  const options=_currentNativeRuntimeOptions(runtime);
+  S._pendingNativeRuntimeOptions={...options};
+  if(S.session) S.session.native_runtime_options={...options};
+  const setValue=(id,value)=>{const element=$(id);if(element) element.value=value==null?'':String(value);};
+  setValue('nativeActionSelect',options.action);
+  setValue('nativeCollaborationModeSelect',options.collaboration_mode);
+  setValue('nativeSandboxSelect',options.sandbox);
+  setValue('nativePersonalitySelect',options.personality);
+  setValue('nativeApprovalSelect',options.approval_policy);
+  const workspace=_nativeWorkspace(runtime,workspaceId);
+  const modes=workspace&&Array.isArray(workspace.modes)?workspace.modes:[];
+  const sandbox=$('nativeSandboxSelect');
+  if(sandbox){
+    for(const option of sandbox.options){
+      option.disabled=!modes.includes(option.value);
     }
-    features.appendChild(list);
-    const boundary=document.createElement('div');
-    boundary.className='native-runtime-boundary';
-    boundary.textContent='Threads, project instructions, skills, apps, MCP, sandboxing, approvals, and local workspace actions run through the official Codex App Server on your machine.';
-    features.appendChild(boundary);
+    sandbox.disabled=!runtime.available||!workspaceId;
+  }
+  const model=_nativeModelInventory(runtime);
+  const effort=$('nativeEffortSelect');
+  if(effort){
+    effort.innerHTML='';
+    const efforts=model&&Array.isArray(model.reasoning_efforts)?model.reasoning_efforts:[];
+    if(!efforts.length){
+      const option=document.createElement('option');option.value='';option.textContent='Model default';effort.appendChild(option);
+    }else{
+      for(const value of efforts){
+        const option=document.createElement('option');
+        option.value=String(value);
+        option.textContent=String(value).replace(/^./,letter=>letter.toUpperCase());
+        effort.appendChild(option);
+      }
+    }
+    effort.value=options.effort||'';
+    effort.disabled=!runtime.available||!efforts.length;
+  }
+  const personality=$('nativePersonalityControl');
+  if(personality) personality.hidden=Boolean(model&&model.supports_personality===false);
+  const controls=$('nativeRuntimeControls');
+  if(controls){
+    for(const control of controls.querySelectorAll('select')){
+      if(control.id!=='nativeSandboxSelect'&&control.id!=='nativeEffortSelect') control.disabled=!runtime.available;
+    }
+  }
+  _renderNativeRuntimeInventory(runtime);
+  const msg=$('msg');
+  if(msg&&_currentExperience()==='work'){
+    msg.placeholder=options.action==='review'
+      ?'Ask Codex to review the uncommitted changes…'
+      :(options.collaboration_mode==='plan'?'Ask Codex to plan the work…':'Ask Codex to work…');
+  }
+}
+async function selectNativeRuntimeOption(key,value){
+  const runtime=_nativeRuntimeById(typeof _selectedNativeRuntimeId==='function'?_selectedNativeRuntimeId():'');
+  if(!runtime) return;
+  const options={..._currentNativeRuntimeOptions(runtime),[key]:value};
+  if(key==='action'&&value==='review') options.review_target='uncommittedChanges';
+  try{
+    await _persistNativeRuntimeOptions(options);
+    syncNativeRuntimeBar();
+    const label=key==='action'&&value==='review'?'Review changes is active for the next Codex turn.':'Codex control updated for the next turn.';
+    if(typeof showToast==='function') showToast(label,2200);
+  }catch(_){
+    if(typeof showToast==='function') showToast('Could not update the Codex control. Please try again.',4200);
   }
 }
 async function selectNativeWorkspace(value){
   const workspaceId=String(value||'').trim();
   if(!workspaceId) return;
+  const previousPendingWorkspace=S._pendingNativeWorkspaceId||null;
   S._pendingNativeWorkspaceId=workspaceId;
-  if(!S.session) return;
+  const runtime=_nativeRuntimeById(typeof _selectedNativeRuntimeId==='function'?_selectedNativeRuntimeId():'');
+  const options=_currentNativeRuntimeOptions(runtime);
+  const selectedWorkspace=_nativeWorkspace(runtime,workspaceId);
+  const modes=selectedWorkspace&&Array.isArray(selectedWorkspace.modes)?selectedWorkspace.modes:[];
+  if(options.sandbox==='workspaceWrite'&&!modes.includes('workspaceWrite')) options.sandbox='readOnly';
+  if(options.sandbox==='readOnly'&&!modes.includes('readOnly')&&modes.includes('workspaceWrite')) options.sandbox='workspaceWrite';
+  S._pendingNativeRuntimeOptions={...options};
+  if(!S.session){
+    syncNativeRuntimeBar();
+    if(typeof showToast==='function') showToast('Local Codex workspace set for the first turn.',2200);
+    return;
+  }
   const previous=S.session.native_workspace_id||null;
+  const previousOptions=(S.session.native_runtime_options&&typeof S.session.native_runtime_options==='object')
+    ?{...S.session.native_runtime_options}:{};
   S.session.native_workspace_id=workspaceId;
+  S.session.native_runtime_options={...options};
   const select=$('nativeWorkspaceSelect');
   if(select) select.setAttribute('aria-busy','true');
   try{
@@ -11354,11 +11575,15 @@ async function selectNativeWorkspace(value){
       session_id:S.session.session_id,
       workspace:S.session.workspace,
       native_workspace_id:workspaceId,
+      native_runtime_options:options,
     })});
     _applySessionContextMetadataUpdate(data);
     if(typeof showToast==='function') showToast('Local Codex workspace updated for the next turn.',2200);
   }catch(error){
     S.session.native_workspace_id=previous;
+    S.session.native_runtime_options=previousOptions;
+    S._pendingNativeWorkspaceId=previousPendingWorkspace||previous;
+    S._pendingNativeRuntimeOptions={...previousOptions};
     syncNativeRuntimeBar();
     if(typeof showToast==='function') showToast('Could not update the local Codex workspace. Please try again.',4200);
   }finally{
@@ -11374,6 +11599,15 @@ function syncExperienceBar(){
   const enabled=items.some(item=>item&&item.id==='chat')&&items.some(item=>item&&item.id==='work');
   bar.hidden=!enabled;
   main.classList.toggle('experience-enabled',enabled);
+  if(document.body){
+    if(enabled) document.body.dataset.sentryProduct='true';
+    else document.body.removeAttribute('data-sentry-product');
+  }
+  if(enabled&&typeof syncPanelOrientation==='function'){
+    syncPanelOrientation(typeof _currentPanel==='string'?_currentPanel:'chat');
+  }
+  if(enabled&&typeof _configureSentryNavigation==='function') _configureSentryNavigation();
+  if(enabled&&typeof _configureSentrySettings==='function') _configureSentrySettings();
   if(!enabled){
     main.removeAttribute('data-experience');
     if(document.body) document.body.removeAttribute('data-sentry-experience');

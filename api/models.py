@@ -1239,6 +1239,7 @@ class Session:
                  enabled_toolsets=None,
                  experience='work',
                  native_workspace_id=None,
+                 native_runtime_options=None,
                  composer_draft=None,
                  anchor_activity_scenes=None,
                  process_wakeup_pause=None,
@@ -1352,6 +1353,11 @@ class Session:
             if native_workspace_id and str(native_workspace_id).strip()
             else None
         )
+        self.native_runtime_options = (
+            dict(native_runtime_options)
+            if isinstance(native_runtime_options, dict)
+            else {}
+        )
         self.composer_draft = composer_draft if isinstance(composer_draft, dict) else {}
         self.anchor_activity_scenes = anchor_activity_scenes if isinstance(anchor_activity_scenes, dict) else {}
         self.process_wakeup_pause = process_wakeup_pause if isinstance(process_wakeup_pause, dict) else {}
@@ -1426,7 +1432,7 @@ class Session:
             'parent_session_id',
             'worktree_path', 'worktree_branch', 'worktree_repo_root', 'worktree_created_at',
             'is_cli_session', 'source_tag', 'raw_source', 'session_source', 'source_label', 'read_only',
-            'enabled_toolsets', 'experience', 'native_workspace_id', 'composer_draft',
+            'enabled_toolsets', 'experience', 'native_workspace_id', 'native_runtime_options', 'composer_draft',
             'process_wakeup_pause',
             'share_token', 'share_created_at',
         ]
@@ -1814,6 +1820,7 @@ class Session:
             'enabled_toolsets': self.enabled_toolsets,
             'experience': self.experience,
             'native_workspace_id': self.native_workspace_id,
+            'native_runtime_options': self.native_runtime_options,
             'composer_draft': self.composer_draft if isinstance(self.composer_draft, dict) else {},
             'process_wakeup_pause': self.process_wakeup_pause if isinstance(self.process_wakeup_pause, dict) else {},
             'share_token': self.share_token,
@@ -5041,7 +5048,7 @@ def _profile_default_model_state(profile=None):
     return default_model or get_effective_default_model(), default_provider
 
 
-def new_session(workspace=None, model=None, profile=None, model_provider=None, project_id=None, worktree_info=None, enabled_toolsets=None, experience='work', native_workspace_id=None):
+def new_session(workspace=None, model=None, profile=None, model_provider=None, project_id=None, worktree_info=None, enabled_toolsets=None, experience='work', native_workspace_id=None, native_runtime_options=None):
     """Create a new in-memory session.
 
     The session lives in the SESSIONS dict only — no disk write happens until
@@ -5097,6 +5104,7 @@ def new_session(workspace=None, model=None, profile=None, model_provider=None, p
         enabled_toolsets=enabled_toolsets,
         experience=experience,
         native_workspace_id=native_workspace_id,
+        native_runtime_options=native_runtime_options,
     )
     # #4985: defensive — auto-generated uuids don't collide with the
     # tombstone, but if a future caller ever passes an explicit id that

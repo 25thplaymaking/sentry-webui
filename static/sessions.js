@@ -1513,6 +1513,15 @@ async function newSession(flash, options={}){
       ? options.native_workspace_id
       : ((S.session&&S.session.native_workspace_id)||S._pendingNativeWorkspaceId||null);
     if(requestedNativeWorkspace) reqBody.native_workspace_id=String(requestedNativeWorkspace);
+    const nativeModelForNew=reqBody.model
+      ?String(reqBody.model).startsWith('chatgpt-plan/')
+      :(typeof _selectedNativeRuntimeId==='function'&&Boolean(_selectedNativeRuntimeId()));
+    const requestedNativeOptions=(options&&Object.prototype.hasOwnProperty.call(options,'native_runtime_options'))
+      ?options.native_runtime_options
+      :((S.session&&S.session.native_runtime_options)||S._pendingNativeRuntimeOptions||null);
+    if(nativeModelForNew&&requestedNativeOptions&&typeof requestedNativeOptions==='object'){
+      reqBody.native_runtime_options={...requestedNativeOptions};
+    }
     const data=await api('/api/session/new',{method:'POST',body:JSON.stringify(reqBody)});
     if(consumedExplicitModelOverride&&typeof _clearEmptyComposerModelOverride==='function'){
       _clearEmptyComposerModelOverride();
@@ -1521,6 +1530,7 @@ async function newSession(flash, options={}){
     S._pendingSessionToolsets=null;
     S._pendingExperience=(data.session&&data.session.experience)||reqBody.experience;
     S._pendingNativeWorkspaceId=(data.session&&data.session.native_workspace_id)||reqBody.native_workspace_id||null;
+    S._pendingNativeRuntimeOptions=(data.session&&data.session.native_runtime_options)||reqBody.native_runtime_options||null;
     if(_sessionSourceFilter==='cli') _sessionSourceFilter='webui';
     if(typeof _hydrateTodosFromSession==='function') _hydrateTodosFromSession(S.session);
     S.lastUsage={...(data.session.last_usage||{})};

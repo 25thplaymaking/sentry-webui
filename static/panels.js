@@ -47,6 +47,243 @@ const APP_TITLEBAR_KEYS = {
 const MAIN_VIEW_PANELS = ['settings','skills','memory','tasks','kanban','workspaces','profiles','insights','logs','plugin'];
 const MAIN_VIEW_SIDEBAR_PANEL_FALLBACKS = { plugin: 'settings' };
 
+const SENTRY_PANEL_GUIDES = {
+  chat:{
+    title:'Chat & Work',
+    purpose:'Chat keeps Hermes in assistant mode. Work enables tools and, when you choose a linked Codex model, the real Codex controls and workstation.',
+    steps:['Choose Chat for conversation, research, and planning without workspace actions.','Choose Work for multi-step execution.','Pick a model in the composer; linked providers appear in their own sections and native Codex controls open automatically.'],
+    faq:[['Does Chat use Codex tools?','Only when you explicitly choose a linked Codex model; Sentry then moves that conversation into Work.'],['What stays selected by default?','DeepSeek remains the economical Hermes default until you choose a different model.']],
+    demo:'Focus composer',
+  },
+  tasks:{
+    title:'Scheduled jobs',
+    purpose:'Create profile-scoped reminders and recurring jobs that the Sentry scheduler can actually run.',
+    steps:['Create a job with a prompt and schedule.','Pause, resume, edit, or run it now from its detail view.','Review the last run result without opening the server.'],
+    faq:[['Are these browser reminders?','No. Jobs live in Sentry and continue running after this app closes.'],['Which agent runs them?','The currently signed-in Sentry profile.']],
+    demo:'Create a job',
+  },
+  kanban:{
+    title:'Work board',
+    purpose:'Track the real work orders Sentry has created, their execution state, evidence, and allowed next actions.',
+    steps:['Create a scoped read-only or workspace-write work order.','Move it only through transitions allowed by Sentry’s state machine.','Open a card to inspect runs, events, and the audit trail.'],
+    faq:[['Is this a second task database?','No. Every card is a projection of an authoritative Sentry work order.'],['Can dragging bypass approval?','No. State changes are validated and audited by the Gateway.']],
+    demo:'Create a work order',
+  },
+  skills:{
+    title:'Skills',
+    purpose:'See governed Sentry skills together with the skills reported by your linked Codex installation.',
+    steps:['The linked workstation reports the skills its Codex installation can actually load.','Open a skill to see its source, scope, description, and state.','Approve proposed Sentry skill changes from Agent; native Codex files remain managed by Codex on your machine.'],
+    faq:[['Does linking a model invent skills?','No. Native skills appear only when the Codex App Server reports them.'],['Can Sentry silently edit them?','No. Sentry-governed writes use the Agent review queue.']],
+    demo:'Refresh skills',
+  },
+  memory:{
+    title:'Personal memory',
+    purpose:'Store profile-scoped facts and preferences that Hermes receives as bounded context on each chat turn.',
+    steps:['Choose a memory section.','Edit and save the information you want Hermes to retain.','Start a new Hermes chat turn; Sentry injects only your profile’s saved sections.'],
+    faq:[['Is memory shared between users?','No. Reads and writes are scoped to the signed-in profile.'],['Can memory override safety rules?','No. It is treated as context, never as authority.']],
+    demo:'Open memory',
+  },
+  workspaces:{
+    title:'Linked workspaces',
+    purpose:'See the named folders your workstation has explicitly published to Sentry—never paths inside the shared WebUI container.',
+    steps:['The workstation registers allowlisted workspace names and access modes.','Choose one in the automatic Codex Work bar.','Each signed work order carries only the workspace id and approved mode.'],
+    faq:[['Can Sentry browse my whole PC?','No. It can reach only roots published by the linked workstation node.'],['Can the browser add any folder?','No. The installed workstation bridge publishes only its approved roots; arbitrary browser paths are deliberately blocked.']],
+    demo:'Open Codex Work',
+  },
+  profiles:{
+    title:'Agent profiles',
+    purpose:'Inspect the isolated Sentry identity that owns this sign-in’s conversations, memory, jobs, subscriptions, and audit history.',
+    steps:['Select the profile to inspect its identity and active status.','Use Agent to manage subscriptions owned by this profile.','Sign in with a different identity when you need a different isolated scope.'],
+    faq:[['Why is there no switch button?','The browser token is bound to one profile, so Sentry will not silently swap identities.'],['Are provider sign-ins global?','No. Subscription connections belong to the signed-in profile.']],
+    demo:'Refresh profiles',
+  },
+  todos:{
+    title:'Live plan',
+    purpose:'Follow the current plan emitted by a running Hermes or Codex session; this is live execution state, not a manual checklist.',
+    steps:['Start a multi-step Work request.','When the runtime publishes a plan, steps appear here immediately.','Completed, active, and pending states update from the same live session.'],
+    faq:[['Why is it empty?','It stays empty until the active session publishes a plan.'],['Does it create scheduled jobs?','No. Use Scheduled jobs for persistent automation.']],
+    demo:'Start a planned task',
+  },
+  insights:{
+    title:'Usage insights',
+    purpose:'Review real profile-scoped model usage and tool activity recorded by the Sentry Gateway.',
+    steps:['Choose a time window.','Compare turns and token usage by model.','Use activity counts to understand how the assistant is working.'],
+    faq:[['Is this estimated from browser history?','No. Sentry aggregates recorded runtime actions.'],['Why can a model be blank?','That means the runtime did not report a model; Sentry leaves the gap visible instead of guessing.']],
+    demo:'Refresh insights',
+  },
+  logs:{
+    title:'Activity',
+    purpose:'Read a safe, profile-scoped timeline of agent actions without exposing prompts, command arguments, or server log files.',
+    steps:['Sentry loads the newest recorded actions for your profile.','Filter the visible activity by severity.','Copy the safe timeline when you need to share diagnostics.'],
+    faq:[['Are these raw server logs?','No. Raw shared-container logs are intentionally unavailable to end users.'],['Can I see another profile?','No. The Gateway fixes the scope to the caller’s profile.']],
+    demo:'Refresh activity',
+  },
+  agentadmin:{
+    title:'Agent control',
+    purpose:'Connect your subscriptions, review proposed writes, and manage messages sent to your Hermes agent.',
+    steps:['Connect each provider once.','Its models appear automatically in the Chat and Work picker.','Approve or reject staged memory and skill changes before they are applied.'],
+    faq:[['Do provider accounts import their whole product?','They supply model access. Native Codex inventory and controls appear only through the linked workstation App Server.'],['Why is a provider hidden in the picker?','Providers and their models are hidden when the active profile is not linked.']],
+    demo:'Refresh connections',
+  },
+  settings:{
+    title:'Sentry settings',
+    purpose:'Adjust conversation and appearance preferences that this Sentry client can actually apply.',
+    steps:['Use Conversation for exports and active-session actions.','Use Appearance and Preferences for this client.','Manage model subscriptions from Agent, where the connection state is authoritative.'],
+    faq:[['Where are provider settings?','Subscriptions live in Agent so there is one real source of truth.'],['Do local Hermes plugins affect Sentry?','No. Controls for the shared WebUI container are hidden in Sentry mode.']],
+    demo:'Open appearance',
+  },
+};
+let _featureGuidePanel='';
+let _featureGuideTrigger=null;
+
+function _isSentryProductMode(){
+  const items=window._experiencePolicies&&window._experiencePolicies.items;
+  return Array.isArray(items)&&items.some(item=>item&&item.id==='chat')&&items.some(item=>item&&item.id==='work');
+}
+
+function _setSentryNavigationLabel(panel,label){
+  document.querySelectorAll(`[data-panel="${panel}"]`).forEach(tab=>{
+    tab.setAttribute('data-tooltip',label);
+    tab.setAttribute('aria-label',label);
+    if(tab.dataset.label!==undefined) tab.dataset.label=label;
+  });
+}
+
+function _configureSentryNavigation(){
+  if(!_isSentryProductMode()) return;
+  _setSentryNavigationLabel('tasks','Scheduled jobs');
+  _setSentryNavigationLabel('kanban','Work board');
+  _setSentryNavigationLabel('todos','Live plan');
+  _setSentryNavigationLabel('logs','Activity');
+}
+
+function _configureSentrySettings(){
+  if(!_isSentryProductMode()) return;
+  _configureSentryNavigation();
+  const allowed=new Set(['conversation','appearance','preferences','help']);
+  document.querySelectorAll('#settingsMenu [data-settings-section]').forEach(item=>{
+    item.hidden=!allowed.has(item.dataset.settingsSection);
+  });
+  const search=$('settingsSearch');
+  const searchWrap=search&&search.closest('.settings-search');
+  if(searchWrap) searchWrap.hidden=true;
+  const hideField=id=>{
+    const control=$(id);
+    const field=control&&control.closest('.settings-field');
+    if(field) field.classList.add('sentry-product-hidden');
+  };
+  [
+    'settingsWorkspacePanelOpen','settingsWorkspaceTodosTab','settingsProjectQuickCreate',
+    'settingsModelChip','auxModelsContainer','settingsMaxTokens','settingsShowQuotaChip',
+    'settingsTerminalAutoExpand','settingsNewChatOnWorkspaceSwitch','settingsShowCliSessions',
+    'settingsShowCronSessions','settingsShowClaudeCodeSessions','settingsShowWebhookSessions',
+    'settingsShowKanbanSessions','settingsShowPreviousMessagingSessions','settingsSyncInsights',
+    'settingsCheckUpdates','settingsUpdateChannel','settingsRawAudio','settingsLargeTextPasteAsAttachment',
+    'settingsIgnoreAgentUpdates','settingsWhatsNewSummary','settingsBotName',
+  ].forEach(hideField);
+  const composerSituational=$('composerSituationalControlsChips');
+  if(composerSituational){
+    const field=composerSituational.closest('.settings-field');
+    if(field) field.classList.add('sentry-product-hidden');
+  }
+  const prefs=$('settingsPanePreferences');
+  if(prefs&&!$('sentrySettingsRouting')){
+    const card=document.createElement('section');
+    card.id='sentrySettingsRouting';
+    card.className='sentry-settings-routing';
+    card.setAttribute('aria-labelledby','sentrySettingsRoutingTitle');
+    card.innerHTML='<div><strong id="sentrySettingsRoutingTitle">Model routing lives in Chat and Work</strong><span>DeepSeek remains the default assistant. Linked subscriptions appear in the grouped model picker; choosing Codex automatically opens its real Work controls.</span></div><button type="button" class="btn secondary" onclick="switchPanel(\'agentadmin\')">Manage linked accounts</button>';
+    const head=prefs.querySelector('.settings-section-head');
+    if(head) head.insertAdjacentElement('afterend',card);
+    else prefs.prepend(card);
+  }
+  if(!allowed.has(_currentSettingsSection)){
+    _currentSettingsSection='conversation';
+    _settingsSection='conversation';
+  }
+}
+
+function syncPanelOrientation(panel){
+  if(!_isSentryProductMode()) return;
+  const guide=SENTRY_PANEL_GUIDES[panel];
+  const panelEl=$('panel'+String(panel||'').charAt(0).toUpperCase()+String(panel||'').slice(1));
+  if(!guide||!panelEl) return;
+  let strip=panelEl.querySelector(':scope > .panel-orientation');
+  if(!strip){
+    strip=document.createElement('div');
+    strip.className='panel-orientation';
+    const head=panelEl.querySelector(':scope > .panel-head');
+    if(head) head.insertAdjacentElement('afterend',strip);
+    else panelEl.prepend(strip);
+  }
+  strip.innerHTML='';
+  const copy=document.createElement('span');
+  copy.textContent=guide.purpose;
+  const button=document.createElement('button');
+  button.type='button';
+  button.className='panel-orientation-btn';
+  button.textContent='Guide & FAQ';
+  button.addEventListener('click',event=>openFeatureGuide(panel,event.currentTarget));
+  strip.append(copy,button);
+}
+
+function openFeatureGuide(panel,trigger){
+  const guide=SENTRY_PANEL_GUIDES[panel];
+  const dialog=$('featureGuideDialog');
+  if(!guide||!dialog) return;
+  _featureGuidePanel=panel;
+  _featureGuideTrigger=trigger||document.activeElement;
+  $('featureGuideTitle').textContent=guide.title;
+  $('featureGuidePurpose').textContent=guide.purpose;
+  const steps=$('featureGuideSteps');
+  steps.innerHTML='';
+  for(const step of guide.steps){const row=document.createElement('li');row.textContent=step;steps.appendChild(row);}
+  const faq=$('featureGuideFaq');
+  faq.innerHTML='';
+  for(const entry of guide.faq){
+    const details=document.createElement('details');
+    const summary=document.createElement('summary');summary.textContent=entry[0];
+    const answer=document.createElement('p');answer.textContent=entry[1];
+    details.append(summary,answer);faq.appendChild(details);
+  }
+  $('featureGuideDemoBtn').textContent=guide.demo||'Try it';
+  if(typeof dialog.showModal==='function') dialog.showModal();
+  else dialog.setAttribute('open','');
+  const close=dialog.querySelector('.feature-guide-close');
+  if(close) close.focus({preventScroll:true});
+}
+
+function closeFeatureGuide(){
+  const dialog=$('featureGuideDialog');
+  if(!dialog) return;
+  if(typeof dialog.close==='function'&&dialog.open) dialog.close();
+  else dialog.removeAttribute('open');
+  if(_featureGuideTrigger&&typeof _featureGuideTrigger.focus==='function') _featureGuideTrigger.focus({preventScroll:true});
+}
+
+async function runFeatureGuideDemo(){
+  const panel=_featureGuidePanel;
+  closeFeatureGuide();
+  if(panel==='chat') {await switchPanel('chat');const msg=$('msg');if(msg)msg.focus();return;}
+  if(panel==='tasks') {if(typeof openCronCreate==='function')openCronCreate();return;}
+  if(panel==='kanban') {if(typeof openSentryWorkOrderCreate==='function')openSentryWorkOrderCreate();else if(typeof openKanbanCreate==='function')openKanbanCreate();return;}
+  if(panel==='skills') {await loadSkills(true);return;}
+  if(panel==='memory') {await loadMemory();const first=$('memoryPanel')&&$('memoryPanel').querySelector('button,[role="button"]');if(first)first.click();return;}
+  if(panel==='workspaces'||panel==='todos') {await switchPanel('chat');if(typeof selectExperience==='function')await selectExperience('work');const msg=$('msg');if(msg)msg.focus();return;}
+  if(panel==='profiles') {await loadProfilesPanel();return;}
+  if(panel==='insights') {await loadInsights(true);return;}
+  if(panel==='logs') {await loadLogs(true);return;}
+  if(panel==='agentadmin') {if(typeof loadAgentAdmin==='function')await loadAgentAdmin();return;}
+  if(panel==='settings') {await switchPanel('settings');switchSettingsSection('appearance');}
+}
+
+document.addEventListener('cancel',event=>{
+  if(event.target&&event.target.id==='featureGuideDialog'){
+    event.preventDefault();
+    closeFeatureGuide();
+  }
+});
+
 /**
  * Update the top app titlebar to reflect the current page or selected conversation.
  * On the chat panel, a selected session's title takes precedence over the page name.
@@ -441,6 +678,7 @@ async function switchPanel(name, opts = {}) {
   document.querySelectorAll('.panel-view').forEach(p => p.classList.remove('active'));
   const panelEl = $('panel' + nextPanel.charAt(0).toUpperCase() + nextPanel.slice(1));
   if (panelEl) panelEl.classList.add('active');
+  syncPanelOrientation(nextPanel);
   // Update main content view. Each entry in MAIN_VIEW_PANELS gets a matching
   // showing-<name> class on <main>; no class means chat (the default).
   const mainEl = document.querySelector('main.main');
@@ -463,6 +701,7 @@ async function switchPanel(name, opts = {}) {
   _syncLogsAutoRefresh();
   if (typeof _syncSystemHealthMonitorVisibility === 'function') _syncSystemHealthMonitorVisibility();
   if (nextPanel === 'settings') {
+    _configureSentrySettings();
     switchSettingsSection(_currentSettingsSection);
     loadSettingsPanel();
   }
@@ -1104,7 +1343,9 @@ async function loadCrons(animate) {
       const emptyText = (!_showAllCronProfiles && _cronOtherProfileCount > 0)
         ? 'No cron jobs in the active profile.'
         : (t('cron_no_jobs') || 'No jobs yet');
-      box.innerHTML = `<div style="padding:16px;color:var(--muted);font-size:12px">${esc(emptyText)}</div>`;
+      box.innerHTML = _isSentryProductMode()
+        ?`<div class="panel-functional-empty"><strong>${esc(emptyText)}</strong><span>Scheduled jobs run through Sentry even while this app is closed.</span><button type="button" class="btn secondary" onclick="openCronCreate()">Create a job</button></div>`
+        :`<div style="padding:16px;color:var(--muted);font-size:12px">${esc(emptyText)}</div>`;
       _appendCronProfileToggle(box);
       if (_cronMode !== 'create' && _cronMode !== 'edit') _clearCronDetail();
       return;
@@ -2724,6 +2965,224 @@ function _kanbanUnavailableHtml(err){
 
 let _kanbanRetired = false;
 
+function _configureSentryWorkBoard(){
+  const panel=$('panelKanban');
+  if(panel){
+    panel.querySelectorAll('#kanbanAssigneeFilter,#kanbanTenantFilter,.kanban-check,#kanbanBulkBar').forEach(el=>{el.style.display='none';});
+    const title=panel.querySelector('.panel-head>span');
+    if(title) title.textContent='Work board';
+  }
+  const main=$('mainKanban');
+  if(main){
+    const title=main.querySelector('.main-view-title');
+    if(title) title.textContent='Sentry work orders';
+    main.querySelectorAll('#btnKanbanCreateBoard,#btnKanbanViewToggle,#btnKanbanPreviewDispatcher,#btnKanbanRunDispatcher,#kanbanBoardSwitcher').forEach(el=>{el.style.display='none';});
+    const note=main.querySelector('.kanban-readonly');
+    if(note){note.style.display='';note.textContent='Audited work-order state';}
+  }
+  const newButton=$('kanbanNewTaskBtn');
+  if(newButton) newButton.onclick=openSentryWorkOrderCreate;
+}
+
+function _sentryWorkOrderStateLabel(value){
+  const labels={
+    draft:'Draft',submitted:'Submitted',needsClarification:'Needs clarification',triaged:'Triaged',
+    assigned:'Assigned',inProgress:'In progress',needsInput:'Needs input',readyForReview:'Ready for review',
+    changesRequested:'Changes requested',resolved:'Resolved',closed:'Closed',cancelled:'Cancelled',failed:'Failed',
+  };
+  return labels[value]||String(value||'').replace(/([a-z])([A-Z])/g,'$1 $2');
+}
+
+function _sentryWorkOrderCard(task){
+  const button=document.createElement('button');
+  button.type='button';
+  button.className='sentry-work-card';
+  button.dataset.workOrderId=String(task.id||'');
+  button.addEventListener('click',()=>loadSentryWorkOrder(task.id));
+  const state=document.createElement('span');
+  state.className=`sentry-work-state state-${String(task.state||'').toLowerCase()}`;
+  state.textContent=_sentryWorkOrderStateLabel(task.state);
+  const title=document.createElement('strong');
+  title.textContent=String(task.title||'Untitled work order');
+  const meta=document.createElement('span');
+  meta.className='sentry-work-meta';
+  meta.textContent=[task.mode==='workspaceWrite'?'Can edit':'Read only',task.workspace_id,task.harness,_kanbanFormatTimestamp(task.updated_at)].filter(Boolean).join(' · ');
+  button.append(state,title,meta);
+  return button;
+}
+
+function _renderSentryWorkBoard(data){
+  _kanbanBoard=data||{columns:[],tasks:[]};
+  const columns=Array.isArray(_kanbanBoard.columns)?_kanbanBoard.columns:[];
+  const query=String(($('kanbanSearch')&&$('kanbanSearch').value)||'').trim().toLowerCase();
+  const board=$('kanbanBoard');
+  const list=$('kanbanList');
+  const summary=$('kanbanSummary');
+  if(summary){
+    summary.textContent=`${Array.isArray(_kanbanBoard.tasks)?_kanbanBoard.tasks.length:0} work order${_kanbanBoard.tasks&&_kanbanBoard.tasks.length===1?'':'s'}`;
+  }
+  if(board){
+    board.innerHTML='';
+    board.classList.add('sentry-work-board');
+    for(const column of columns){
+      const lane=document.createElement('section');
+      lane.className='sentry-work-lane';
+      const heading=document.createElement('div');
+      heading.className='sentry-work-lane-head';
+      const name=document.createElement('span');name.textContent=String(column.name||'Work');
+      const tasks=(Array.isArray(column.tasks)?column.tasks:[]).filter(task=>{
+        if(!query)return true;
+        return [task.id,task.title,task.body,task.state,task.workspace_id].filter(Boolean).join(' ').toLowerCase().includes(query);
+      });
+      const count=document.createElement('span');count.textContent=String(tasks.length);
+      heading.append(name,count);lane.appendChild(heading);
+      const body=document.createElement('div');body.className='sentry-work-lane-body';
+      if(!tasks.length){const empty=document.createElement('div');empty.className='sentry-work-lane-empty';empty.textContent='No work orders';body.appendChild(empty);}
+      else for(const task of tasks)body.appendChild(_sentryWorkOrderCard(task));
+      lane.appendChild(body);board.appendChild(lane);
+    }
+  }
+  if(list){
+    list.innerHTML='';
+    const tasks=columns.flatMap(column=>(column.tasks||[])).filter(task=>{
+      if(!query)return true;
+      return [task.id,task.title,task.body,task.state,task.workspace_id].filter(Boolean).join(' ').toLowerCase().includes(query);
+    });
+    if(!tasks.length){
+      const empty=document.createElement('div');empty.className='sentry-work-list-empty';
+      empty.innerHTML='<strong>No work orders yet</strong><span>Create one here, or start a Codex Work turn from Chat.</span>';
+      const action=document.createElement('button');action.type='button';action.className='btn secondary';action.textContent='Create work order';action.onclick=openSentryWorkOrderCreate;
+      empty.appendChild(action);list.appendChild(empty);
+    }else for(const task of tasks)list.appendChild(_sentryWorkOrderCard(task));
+  }
+}
+
+async function _loadSentryWorkBoard(animate){
+  _configureSentryWorkBoard();
+  const board=$('kanbanBoard');
+  if(animate&&board) board.innerHTML='<div class="panel-functional-loading">Loading work orders…</div>';
+  try{
+    const data=await api('/api/kanban/board');
+    _renderSentryWorkBoard(data);
+    _kanbanStopPolling();
+    _kanbanPollTimer=setInterval(()=>{if(_currentPanel==='kanban')_loadSentryWorkBoard(false);},15000);
+  }catch(error){
+    const message=error&&Number(error.status)===401?'Sign in again to load your work orders.':'Work orders are temporarily unavailable.';
+    const html=`<div class="panel-functional-empty"><strong>${esc(message)}</strong><span>${esc(error&&error.message||'')}</span><button type="button" class="btn secondary" onclick="loadKanban(true)">Try again</button></div>`;
+    if(board)board.innerHTML=html;
+    if($('kanbanList'))$('kanbanList').innerHTML=html;
+  }
+}
+
+function openSentryWorkOrderCreate(){
+  const dialog=$('sentryWorkOrderDialog');
+  if(!dialog)return;
+  const title=$('sentryWorkOrderTitle');
+  const body=$('sentryWorkOrderBody');
+  const mode=$('sentryWorkOrderMode');
+  const error=$('sentryWorkOrderError');
+  if(title)title.value='';if(body)body.value='';if(mode)mode.value='readOnly';if(error)error.textContent='';
+  if(typeof dialog.showModal==='function')dialog.showModal();else dialog.setAttribute('open','');
+  if(title)setTimeout(()=>title.focus({preventScroll:true}),0);
+}
+
+function closeSentryWorkOrderCreate(){
+  const dialog=$('sentryWorkOrderDialog');
+  if(!dialog)return;
+  if(typeof dialog.close==='function'&&dialog.open)dialog.close();else dialog.removeAttribute('open');
+}
+
+async function submitSentryWorkOrderCreate(){
+  const title=String(($('sentryWorkOrderTitle')&&$('sentryWorkOrderTitle').value)||'').trim();
+  const body=String(($('sentryWorkOrderBody')&&$('sentryWorkOrderBody').value)||'').trim();
+  const mode=String(($('sentryWorkOrderMode')&&$('sentryWorkOrderMode').value)||'readOnly');
+  const error=$('sentryWorkOrderError');
+  const submit=$('sentryWorkOrderSubmit');
+  if(!title){if(error)error.textContent='Add a title first.';return;}
+  if(submit){submit.disabled=true;submit.setAttribute('aria-busy','true');}
+  if(error)error.textContent='';
+  try{
+    const result=await api('/api/kanban/tasks',{method:'POST',body:JSON.stringify({title,body,mode})});
+    closeSentryWorkOrderCreate();
+    await _loadSentryWorkBoard(true);
+    const task=result&&result.task;
+    if(task&&task.id)await loadSentryWorkOrder(task.id);
+    if(typeof showToast==='function')showToast('Work-order draft created.',2200);
+  }catch(exception){
+    if(error)error.textContent=exception&&exception.message?exception.message:'Could not create the work order.';
+  }finally{
+    if(submit){submit.disabled=false;submit.removeAttribute('aria-busy');}
+  }
+}
+
+function _sentryWorkTimeline(title,items,format){
+  const section=document.createElement('section');section.className='sentry-work-detail-section';
+  const heading=document.createElement('h3');heading.textContent=`${title} (${items.length})`;section.appendChild(heading);
+  if(!items.length){const empty=document.createElement('div');empty.className='sentry-work-detail-empty';empty.textContent='None yet';section.appendChild(empty);return section;}
+  const list=document.createElement('div');list.className='sentry-work-timeline';
+  for(const item of items){const row=document.createElement('div');row.className='sentry-work-timeline-row';const copy=format(item);const strong=document.createElement('strong');strong.textContent=copy[0];const meta=document.createElement('span');meta.textContent=copy[1];row.append(strong,meta);list.appendChild(row);}
+  section.appendChild(list);return section;
+}
+
+async function loadSentryWorkOrder(workOrderId){
+  if(!workOrderId)return;
+  _kanbanCurrentTaskId=String(workOrderId);
+  const preview=$('kanbanTaskPreview');
+  if(!preview)return;
+  preview.style.display='';preview.innerHTML='<div class="panel-functional-loading">Loading work-order evidence…</div>';
+  document.querySelectorAll('.sentry-work-card').forEach(card=>card.classList.toggle('selected',card.dataset.workOrderId===String(workOrderId)));
+  try{
+    const data=await api('/api/kanban/tasks/'+encodeURIComponent(workOrderId));
+    const task=data&&data.task||{};
+    preview.innerHTML='';
+    const shell=document.createElement('article');shell.className='sentry-work-detail';
+    const head=document.createElement('div');head.className='sentry-work-detail-head';
+    const copy=document.createElement('div');
+    const state=document.createElement('span');state.className='sentry-work-state';state.textContent=_sentryWorkOrderStateLabel(task.state);
+    const title=document.createElement('h2');title.textContent=String(task.title||'Work order');
+    const meta=document.createElement('p');meta.textContent=[task.mode==='workspaceWrite'?'Workspace write':'Read only',task.harness||'No harness assigned',task.workspace_id||'No workspace assigned'].join(' · ');
+    copy.append(state,title,meta);
+    const close=document.createElement('button');close.type='button';close.className='feature-guide-close';close.setAttribute('aria-label','Close work-order detail');close.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>';close.onclick=closeKanbanTaskDetail;
+    head.append(copy,close);shell.appendChild(head);
+    if(task.body){const prompt=document.createElement('div');prompt.className='sentry-work-detail-prompt';prompt.textContent=String(task.body);shell.appendChild(prompt);}
+    const criteria=Array.isArray(task.completion_criteria)?task.completion_criteria:[];
+    if(criteria.length){const block=document.createElement('section');block.className='sentry-work-detail-section';const heading=document.createElement('h3');heading.textContent='Completion criteria';const list=document.createElement('ul');for(const value of criteria){const li=document.createElement('li');li.textContent=String(value);list.appendChild(li);}block.append(heading,list);shell.appendChild(block);}
+    const targets=Array.isArray(task.allowed_targets)?task.allowed_targets:[];
+    if(targets.length){
+      const actions=document.createElement('section');actions.className='sentry-work-detail-section sentry-work-actions';
+      const heading=document.createElement('h3');heading.textContent='Allowed next actions';actions.appendChild(heading);
+      const controls=document.createElement('div');controls.className='sentry-work-action-controls';
+      const reason=document.createElement('input');reason.id='sentryWorkTransitionReason';reason.type='text';reason.maxLength=500;reason.placeholder='Reason or note (optional)';reason.setAttribute('aria-label','Transition reason or note');
+      const buttons=document.createElement('div');buttons.className='sentry-work-action-buttons';
+      for(const target of targets){const button=document.createElement('button');button.type='button';button.className=`btn ${target==='cancelled'?'secondary':'primary'}`;button.textContent=_sentryWorkOrderStateLabel(target);button.onclick=()=>transitionSentryWorkOrder(task.id,target);buttons.appendChild(button);}
+      controls.append(reason,buttons);actions.appendChild(controls);shell.appendChild(actions);
+    }
+    const transitions=Array.isArray(data.transitions)?data.transitions:[];
+    shell.appendChild(_sentryWorkTimeline('State history',transitions,item=>[`${_sentryWorkOrderStateLabel(item.from_state)} → ${_sentryWorkOrderStateLabel(item.to_state)}`,[item.reason,_kanbanFormatTimestamp(item.occurred_at)].filter(Boolean).join(' · ')]));
+    const runs=Array.isArray(data.runs)?data.runs:[];
+    shell.appendChild(_sentryWorkTimeline('Runs',runs,item=>[`Attempt ${item.attempt||''} · ${item.outcome||item.status_boundary||'running'}`,[item.harness,item.summary,_kanbanFormatTimestamp(item.started_at)].filter(Boolean).join(' · ')]));
+    const events=Array.isArray(data.events)?data.events:[];
+    shell.appendChild(_sentryWorkTimeline('Evidence',events,item=>[String(item.event_type||'event'),[item.summary,_kanbanFormatTimestamp(item.occurred_at)].filter(Boolean).join(' · ')]));
+    preview.appendChild(shell);
+  }catch(error){
+    preview.innerHTML=`<div class="panel-functional-empty"><strong>Could not load this work order.</strong><span>${esc(error&&error.message||'')}</span></div>`;
+  }
+}
+
+async function transitionSentryWorkOrder(workOrderId,target){
+  const reason=String(($('sentryWorkTransitionReason')&&$('sentryWorkTransitionReason').value)||'').trim()||null;
+  if(target==='cancelled'&&typeof showConfirmDialog==='function'){
+    const confirmed=await showConfirmDialog({title:'Cancel work order',message:'Stop this work order? Its existing history remains available.',confirmLabel:'Cancel work order',danger:true,focusCancel:true});
+    if(!confirmed)return;
+  }
+  try{
+    await api('/api/kanban/tasks/'+encodeURIComponent(workOrderId)+'/transition',{method:'POST',body:JSON.stringify({target,reason})});
+    await _loadSentryWorkBoard(false);
+    await loadSentryWorkOrder(workOrderId);
+    if(typeof showToast==='function')showToast(`Work order moved to ${_sentryWorkOrderStateLabel(target)}.`,2200);
+  }catch(error){if(typeof showToast==='function')showToast(error&&error.message||'Could not move the work order.',4200,'error');}
+}
+
 function _retireKanbanPanel(){
   // A 501 from the kanban routes means this deployment has no board at all
   // (sentry dialect: the agent exposes no board source). Leaving the search,
@@ -2761,6 +3220,7 @@ function _retireKanbanPanel(){
 }
 
 async function loadKanban(animate){
+  if(_isSentryProductMode()) return _loadSentryWorkBoard(animate);
   if (_kanbanRetired) return;
   const board = $('kanbanBoard');
   const list = $('kanbanList');
@@ -2816,7 +3276,10 @@ async function loadKanban(animate){
   }
 }
 
-function filterKanban(){ _kanbanRenderBoard(); }
+function filterKanban(){
+  if(_isSentryProductMode()) _renderSentryWorkBoard(_kanbanBoard||{columns:[],tasks:[]});
+  else _kanbanRenderBoard();
+}
 
 async function loadKanbanStats(){
   try {
@@ -3075,6 +3538,7 @@ function closeKanbanTaskDetail(){
   }
   const board = $('kanbanBoard');
   if (board) board.querySelectorAll('.kanban-card').forEach(card => card.classList.remove('selected'));
+  document.querySelectorAll('.sentry-work-card').forEach(card=>card.classList.remove('selected'));
 }
 
 function _kanbanFormatTimestamp(value){
@@ -3210,7 +3674,7 @@ async function createKanbanTask(){
     // — open the full create-task modal so the user has somewhere obvious to
     // type and configure the task. Mirrors the cron / skills pattern of routing
     // header "+" clicks through to a clearly-modal create surface.
-    openKanbanCreate();
+    if(_isSentryProductMode())openSentryWorkOrderCreate();else openKanbanCreate();
     return;
   }
   try {
@@ -3350,6 +3814,7 @@ async function _kanbanPopulateAssigneeSelect(currentValue){
 }
 
 function openKanbanCreate(){
+  if(_isSentryProductMode()){openSentryWorkOrderCreate();return;}
   // Make sure the user is on the kanban panel so the resulting board reload is
   // visible behind the modal.
   if (typeof switchPanel === 'function' && _currentPanel !== 'kanban') switchPanel('kanban');
@@ -3896,9 +4361,15 @@ function loadTodos() {
   }
 
   if (!todos.length) {
-    if (typeof _todosLastRenderedHash !== 'undefined' && _todosLastRenderedHash === '__empty__') return;
-    panel.innerHTML = renderTodoEmptyState();
-    if (typeof _todosLastRenderedHash !== 'undefined') _todosLastRenderedHash = '__empty__';
+    const sentry=_isSentryProductMode();
+    const emptyHash=sentry?'__sentry_empty__':'__empty__';
+    if (typeof _todosLastRenderedHash !== 'undefined' && _todosLastRenderedHash === emptyHash) return;
+    if(sentry){
+      const title=$('panelTodos')&&$('panelTodos').querySelector('.panel-head>span');if(title)title.textContent='Live plan';
+      document.querySelectorAll('[data-panel="todos"]').forEach(tab=>{tab.setAttribute('data-tooltip','Live plan');tab.setAttribute('aria-label','Live plan');if(tab.dataset.label)tab.dataset.label='Live plan';});
+      panel.innerHTML='<div class="panel-functional-empty"><strong>No live plan yet</strong><span>Start a multi-step Work request. Hermes or Codex plan updates will appear here automatically while the session runs.</span><button type="button" class="btn secondary" onclick="switchPanel(\'chat\').then(()=>selectExperience(\'work\'))">Start in Work</button></div>';
+    }else panel.innerHTML = renderTodoEmptyState();
+    if (typeof _todosLastRenderedHash !== 'undefined') _todosLastRenderedHash = emptyHash;
     return;
   }
 
@@ -4384,6 +4855,14 @@ async function loadLogs(animate) {
   const status = $('logsStatus');
   const refreshBtn = $('logsRefreshBtn');
   if (!box) return;
+  if(_isSentryProductMode()){
+    const sideTitle=$('panelLogs')&&$('panelLogs').querySelector('.panel-head>span');if(sideTitle)sideTitle.textContent='Activity';
+    const mainTitle=$('mainLogs')&&$('mainLogs').querySelector('.main-view-title');if(mainTitle)mainTitle.textContent='Profile activity';
+    const file=$('logsFile');if(file)file.style.display='none';
+    const fileLabel=document.querySelector('label[for="logsFile"]');if(fileLabel)fileLabel.style.display='none';
+    const tailLabel=document.querySelector('label[for="logsTail"]');if(tailLabel)tailLabel.textContent='Items';
+    document.querySelectorAll('[data-panel="logs"]').forEach(tab=>{tab.setAttribute('data-tooltip','Activity');tab.setAttribute('aria-label','Activity');if(tab.dataset.label)tab.dataset.label='Activity';});
+  }
   if (animate && refreshBtn) {
     refreshBtn.style.opacity = '0.5';
     refreshBtn.disabled = true;
@@ -4421,7 +4900,8 @@ function _renderLogs(data) {
     ? `<div class="logs-hint">${esc(displayLines.length + ' / ' + _lastLogsLines.length + ' ' + t('logs_filter_active'))}</div>`
     : '';
   if (!displayLines.length) {
-    box.innerHTML = `${hint}${truncated}${filterNote}<div class="logs-empty">${esc(t('logs_empty'))}</div>`;
+    const empty=_isSentryProductMode()?'No profile activity has been recorded yet.':t('logs_empty');
+    box.innerHTML = `${hint}${truncated}${filterNote}<div class="logs-empty">${esc(empty)}</div>`;
   } else {
     box.innerHTML = `${hint}${truncated}${filterNote}` + displayLines.map(line => {
       const cls = _logLineSeverityClass(line);
@@ -4432,7 +4912,9 @@ function _renderLogs(data) {
   if (status) {
     const bytes = data && Number(data.total_bytes || 0);
     const when = data && data.mtime ? new Date(data.mtime * 1000).toLocaleString() : t('logs_no_mtime');
-    status.textContent = `${rawLines.length} / ${data.tail || _selectedLogsTail()} lines · ${bytes.toLocaleString()} bytes · ${when}`;
+    status.textContent = data&&data.backend==='sentry-actions'
+      ?`${rawLines.length} activities · updated ${when}`
+      :`${rawLines.length} / ${data.tail || _selectedLogsTail()} lines · ${bytes.toLocaleString()} bytes · ${when}`;
   }
 }
 
@@ -4505,6 +4987,11 @@ async function loadInsights(animate) {
   }
   const period = ($('insightsPeriod') || {}).value || '30';
   try {
+    if(_isSentryProductMode()){
+      const data=await api(`/api/insights?days=${period}`);
+      _renderInsights(data,box,{},{usage:{},skill_names:[],total_invocations:0,unique_skills_used:0});
+      return;
+    }
     const [data, wikiStatus, skillUsage] = await Promise.all([
       api(`/api/insights?days=${period}`),
       api('/api/wiki/status').catch(err => ({status:'error', error: err.message || String(err)})),
@@ -4980,7 +5467,8 @@ async function clearConversation() {
 // ── Skills panel ──
 let _skillsBackend = null; // 'sentry-gateway' when the list is the Gateway's read-only governance view
 
-async function loadSkills() {
+async function loadSkills(force=false) {
+  if(force)_skillsData=null;
   if (_skillsData) { renderSkills(_skillsData); return; }
   const box = $('skillsList');
   try {
@@ -5032,7 +5520,12 @@ function renderSkills(skills) {
   }
   const box = $('skillsList');
   box.innerHTML = '';
-  if (!filtered.length) { box.innerHTML = `<div style="padding:12px;color:var(--muted);font-size:12px">${esc(t('skills_no_match'))}</div>`; return; }
+  if (!filtered.length) {
+    if(_skillsBackend==='sentry-gateway'&&!query){
+      box.innerHTML='<div class="panel-functional-empty"><strong>No skills reported yet</strong><span>Connect a Codex model to load its installed skills, or review proposed Sentry skills in Agent.</span><button type="button" class="btn secondary" onclick="switchPanel(\'agentadmin\')">Open Agent</button></div>';
+    }else box.innerHTML = `<div style="padding:12px;color:var(--muted);font-size:12px">${esc(t('skills_no_match'))}</div>`;
+    return;
+  }
   for (const [cat, items] of Object.entries(cats).sort()) {
     const collapsed = _collapsedCats.has(cat);
     const sec = document.createElement('div');
@@ -5211,6 +5704,8 @@ function _openSentrySkill(skill, el) {
   if (title) title.textContent = skill.name;
   if (empty) empty.style.display = 'none';
   const rows = [
+    ['Source', skill.source === 'codex' ? 'Codex installation' : 'Sentry governed'],
+    ['Scope', skill.scope || 'Profile'],
     [t('sentry_skill_state'), skill.state || (skill.enabled ? 'active' : 'inactive')],
     [t('sentry_skill_hash'), skill.content_hash || '—'],
     [t('sentry_skill_created'), skill.created_at ? new Date(skill.created_at).toLocaleString() : '—'],
@@ -5219,7 +5714,11 @@ function _openSentrySkill(skill, el) {
   ).join('');
   if (body) {
     body.style.display = '';
-    body.innerHTML = `<div class="main-view-content"><div class="insights-card"><div class="insights-card-title">${esc(skill.name)}</div><div class="insights-table" style="display:block">${rows}</div><div class="insights-empty" style="margin-top:10px">${esc(t('sentry_skill_readonly_note'))}</div></div></div>`;
+    const description=skill.description?`<p class="sentry-skill-description">${esc(skill.description)}</p>`:'';
+    const note=skill.source==='codex'
+      ?'This skill is loaded by the Codex installation on your machine. Its files remain under Codex control.'
+      :'Changes to this governed skill are staged and reviewed from Agent before they become active.';
+    body.innerHTML = `<div class="main-view-content"><div class="insights-card"><div class="insights-card-title">${esc(skill.name)}</div>${description}<div class="insights-table" style="display:block">${rows}</div><div class="insights-empty" style="margin-top:10px">${esc(note)}</div></div></div>`;
   }
   _setSkillHeaderButtons('empty');
   _closeMobileSidebarAfterPanelSelection();
@@ -6154,8 +6653,93 @@ window.addEventListener('resize',()=>{
 async function loadWorkspacesPanel(){
   const panel=$('workspacesPanel');
   if(!panel)return;
+  if(_isSentryProductMode()){
+    renderSentryWorkspacesPanel();
+    return;
+  }
   const data=await loadWorkspaceList();
   renderWorkspacesPanel(data.workspaces);
+}
+
+function _sentryLinkedWorkspaces(){
+  const result=[];
+  for(const runtime of (Array.isArray(window._nativeRuntimes)?window._nativeRuntimes:[])){
+    if(!runtime||!Array.isArray(runtime.workspaces))continue;
+    for(const workspace of runtime.workspaces){
+      if(!workspace||!workspace.id)continue;
+      result.push({...workspace,runtime_id:runtime.id,node_name:runtime.node_name,available:runtime.available!==false,version:runtime.version});
+    }
+  }
+  return result;
+}
+
+function renderSentryWorkspacesPanel(){
+  const panel=$('workspacesPanel');
+  if(!panel)return;
+  const add=$('panelWorkspaces')&&$('panelWorkspaces').querySelector('.panel-head-actions');
+  if(add)add.style.display='none';
+  const sub=$('panelWorkspaces')&&$('panelWorkspaces').querySelector('.panel-head-sub');
+  if(sub)sub.textContent='Allowlisted folders published by your linked workstation.';
+  const workspaces=_sentryLinkedWorkspaces();
+  panel.innerHTML='';
+  if(!workspaces.length){
+    panel.innerHTML='<div class="panel-functional-empty"><strong>No linked workspaces</strong><span>Link the workstation node to make its allowlisted folders available to Codex Work.</span><button type="button" class="btn secondary" onclick="switchPanel(\'agentadmin\')">Open Agent</button></div>';
+    _clearWorkspaceDetail();
+    const empty=$('workspaceDetailEmpty');
+    if(empty){empty.style.display='';const title=empty.querySelector('.main-view-empty-title');const subtext=empty.querySelector('.main-view-empty-sub');if(title)title.textContent='No linked workspace yet';if(subtext)subtext.textContent='Sentry never substitutes a folder inside the shared WebUI container.';}
+    return;
+  }
+  const current=String((S.session&&S.session.native_workspace_id)||S._pendingNativeWorkspaceId||'');
+  for(const workspace of workspaces){
+    const row=document.createElement('button');row.type='button';row.className='ws-row sentry-linked-workspace';
+    if(String(workspace.id)===current)row.classList.add('active');
+    const info=document.createElement('span');info.className='ws-row-info';
+    const name=document.createElement('span');name.className='ws-row-name';name.textContent=String(workspace.label||workspace.name||workspace.id);
+    const meta=document.createElement('span');meta.className='ws-row-path';meta.textContent=[workspace.node_name,workspace.available?'Connected':'Offline'].filter(Boolean).join(' · ');
+    info.append(name,meta);row.appendChild(info);row.onclick=()=>openSentryWorkspaceDetail(workspace,row);panel.appendChild(row);
+  }
+}
+
+function openSentryWorkspaceDetail(workspace,row){
+  document.querySelectorAll('.sentry-linked-workspace').forEach(item=>item.classList.remove('active'));
+  if(row)row.classList.add('active');
+  _currentWorkspaceDetail=workspace;
+  const title=$('workspaceDetailTitle');const body=$('workspaceDetailBody');const empty=$('workspaceDetailEmpty');
+  if(title)title.textContent=String(workspace.label||workspace.name||workspace.id);
+  if(empty)empty.style.display='none';
+  if(body){
+    body.style.display='';body.innerHTML='';
+    const content=document.createElement('div');content.className='main-view-content';
+    const card=document.createElement('div');card.className='detail-card';
+    const heading=document.createElement('div');heading.className='detail-card-title';heading.textContent='Linked workstation workspace';card.appendChild(heading);
+    const addRow=(label,value)=>{const line=document.createElement('div');line.className='detail-row';const left=document.createElement('div');left.className='detail-row-label';left.textContent=label;const right=document.createElement('div');right.className='detail-row-value';right.textContent=value;line.append(left,right);card.appendChild(line);};
+    addRow('Workspace id',String(workspace.id));addRow('Workstation',String(workspace.node_name||'Linked node'));addRow('Status',workspace.available?'Connected':'Offline');addRow('Access',(workspace.modes||[]).map(mode=>mode==='workspaceWrite'?'Can edit':'Read only').join(', ')||'No access reported');
+    const note=document.createElement('p');note.className='sentry-workspace-boundary';note.textContent='The browser sends this allowlisted name—not a filesystem path. The signed workstation node resolves it locally and validates access again.';
+    const action=document.createElement('button');action.type='button';action.className='btn primary';action.textContent='Use in Codex Work';action.disabled=!workspace.available;action.onclick=()=>useSentryWorkspace(workspace.id,workspace.runtime_id);
+    content.append(card,note,action);body.appendChild(content);
+  }
+  const header=$('mainWorkspaces')&&$('mainWorkspaces').querySelector('.main-view-header');
+  if(header)header.style.display='flex';
+  ['btnActivateWorkspaceDetail','btnEditWorkspaceDetail','btnDeleteWorkspaceDetail','btnCancelWorkspaceDetail','btnSaveWorkspaceDetail'].forEach(id=>{const button=$(id);if(button)button.style.display='none';});
+  _closeMobileSidebarAfterPanelSelection();
+}
+
+async function useSentryWorkspace(workspaceId,runtimeId){
+  S._pendingNativeWorkspaceId=String(workspaceId);
+  const select=$('modelSelect');
+  const currentRuntime=typeof _selectedNativeRuntimeId==='function'?_selectedNativeRuntimeId():'';
+  if(select&&currentRuntime!==runtimeId){
+    const option=Array.from(select.options).find(candidate=>typeof _modelOptionNativeRuntime==='function'&&_modelOptionNativeRuntime(candidate)===runtimeId);
+    if(!option){if(typeof showToast==='function')showToast('Choose a linked Codex model in Chat first.',3600);return;}
+    option.selected=true;
+    if(typeof syncModelChip==='function')syncModelChip();
+    if(typeof select.onchange==='function')await select.onchange();
+  }
+  if(typeof selectNativeWorkspace==='function')await selectNativeWorkspace(workspaceId);
+  await switchPanel('chat');
+  if(typeof selectExperience==='function'&&_currentExperience()!=='work')await selectExperience('work');
+  if(typeof showToast==='function')showToast('Codex Work is using this linked workspace.',2400);
+  const msg=$('msg');if(msg)msg.focus({preventScroll:true});
 }
 
 function renderWorkspacesPanel(workspaces){
@@ -7638,7 +8222,10 @@ async function loadMemory(force) {
     }
     if (panel) {
       panel.innerHTML = '';
-      for (const s of MEMORY_SECTIONS) {
+      const visibleSections=_isSentryProductMode()
+        ?MEMORY_SECTIONS.filter(section=>['memory','user','soul'].includes(section.key))
+        :MEMORY_SECTIONS;
+      for (const s of visibleSections) {
         if (s.key === 'external_notes' && !_memoryData.external_notes_enabled) continue;
         const el = document.createElement('button');
         el.type = 'button';
@@ -7649,6 +8236,11 @@ async function loadMemory(force) {
         if (sectionPath) el.title = sectionPath;
         el.onclick = () => openMemorySection(s.key, el);
         panel.appendChild(el);
+      }
+      if(_isSentryProductMode()&&!_currentMemorySection&&visibleSections.length){
+        const first=panel.querySelector('.side-menu-item');
+        _currentMemorySection=visibleSections[0].key;
+        if(first)first.classList.add('active');
       }
     }
     if (_currentMemorySection && _memoryMode !== 'edit') {
@@ -8103,7 +8695,11 @@ function _composerControlChipLabel(def){
 function _renderComposerControlChips(){
   const container=$('composerControlsChips');
   if(!container) return;
-  const defs=Array.isArray(window._COMPOSER_CONTROL_TOGGLE_DEFS)?window._COMPOSER_CONTROL_TOGGLE_DEFS:[];
+  let defs=Array.isArray(window._COMPOSER_CONTROL_TOGGLE_DEFS)?window._COMPOSER_CONTROL_TOGGLE_DEFS:[];
+  if(_isSentryProductMode()){
+    const unavailable=new Set(['hide_composer_attach','hide_composer_workspace','hide_composer_reasoning']);
+    defs=defs.filter(def=>def&&!unavailable.has(def.key));
+  }
   const state=window._composerControlVisibility||{};
   container.innerHTML='';
   _orderedComposerControlDefsForSettings(defs).forEach(function(def){
@@ -8152,6 +8748,7 @@ function switchSettingsSection(name,opts){
     return;
   }
   let section=(name==='appearance'||name==='preferences'||name==='providers'||name==='plugins'||name==='extensions'||name==='system'||name==='help')?name:'conversation';
+  if(_isSentryProductMode()&&!['conversation','appearance','preferences','help'].includes(section)) section='conversation';
   // Deep-linking to the Plugins pane when the tab is hidden (no plugins
   // installed, #3457) falls back to Conversation. Resolve this BEFORE toggling
   // panes/sidebar/dropdown below so every downstream selection uses the
@@ -9444,9 +10041,11 @@ async function loadSettingsPanel(){
       setLocale(resolvedLanguage);
       if(typeof applyLocaleToDOM==='function') applyLocaleToDOM();
     }
-    // Populate model dropdown from /api/models + live model fetch (#872)
+    // Sentry routes models from the grouped Chat/Work picker. The local Hermes
+    // default/auxiliary model controls target the shared WebUI container and are
+    // deliberately not loaded in Sentry product mode.
     const modelSel=$('settingsModel');
-    if(modelSel){
+    if(modelSel&&!_isSentryProductMode()){
       modelSel.innerHTML='';
       let models=null;
       try{
@@ -9494,8 +10093,10 @@ async function loadSettingsPanel(){
       }
     }
     // Auxiliary models — load task assignments and provider/model options
-    _bindMainAdvancedOptionsButton();
-    _loadAuxiliaryModels();
+    if(!_isSentryProductMode()){
+      _bindMainAdvancedOptionsButton();
+      _loadAuxiliaryModels();
+    }
     // Send key preference
     const sendKeySel=$('settingsSendKey');
     if(sendKeySel){sendKeySel.value=settings.send_key||'enter';sendKeySel.addEventListener('change',_schedulePreferencesAutosave,{once:false});}

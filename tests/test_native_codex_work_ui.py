@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from api.models import Session
-from api.routes import _validate_native_workspace_id
+from api.routes import _validate_native_runtime_options, _validate_native_workspace_id
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -16,8 +16,13 @@ MESSAGES = (ROOT / "static" / "messages.js").read_text(encoding="utf-8")
 
 
 def test_native_workspace_is_persisted_in_the_session_contract(tmp_path):
-    session = Session(workspace=tmp_path, native_workspace_id="server-work")
+    session = Session(
+        workspace=tmp_path,
+        native_workspace_id="server-work",
+        native_runtime_options={"action": "review", "sandbox": "readOnly"},
+    )
     assert session.compact()["native_workspace_id"] == "server-work"
+    assert session.compact()["native_runtime_options"]["action"] == "review"
 
 
 def test_native_workspace_id_is_opaque_and_bounded():
@@ -29,6 +34,20 @@ def test_native_workspace_id_is_opaque_and_bounded():
         _validate_native_workspace_id("bad\nworkspace")
 
 
+def test_native_controls_are_strict_and_receive_safe_defaults():
+    options = _validate_native_runtime_options(
+        {"action": "review", "collaboration_mode": "plan", "sandbox": "readOnly"}
+    )
+    assert options["action"] == "review"
+    assert options["collaboration_mode"] == "plan"
+    assert options["sandbox"] == "readOnly"
+    assert options["approval_policy"] == "on-request"
+    with pytest.raises(ValueError):
+        _validate_native_runtime_options({"action": "pretend-feature"})
+    with pytest.raises(ValueError):
+        _validate_native_runtime_options({"arbitrary": True})
+
+
 def test_codex_work_context_is_hidden_until_a_native_model_is_selected():
     assert 'id="nativeRuntimeBar" hidden' in HTML
     assert 'id="nativeWorkspaceSelect"' in HTML
@@ -36,6 +55,26 @@ def test_codex_work_context_is_hidden_until_a_native_model_is_selected():
     assert "function syncNativeRuntimeBar()" in UI
     assert "bar.hidden=true" in UI
     assert "_selectedNativeRuntimeId()" in UI
+    assert "Active from your Codex installation" not in HTML
+
+
+def test_codex_controls_are_real_inputs_and_inventory_is_runtime_driven():
+    for control_id in (
+        "nativeActionSelect",
+        "nativeCollaborationModeSelect",
+        "nativeEffortSelect",
+        "nativeSandboxSelect",
+        "nativePersonalitySelect",
+        "nativeApprovalSelect",
+    ):
+        assert f'id="{control_id}"' in HTML
+    assert "selectNativeRuntimeOption(" in HTML
+    assert "_renderNativeRuntimeInventory(runtime)" in UI
+    assert "inventory.skills" in UI
+    assert "inventory.apps" in UI
+    assert "inventory.mcp_servers" in UI
+    assert "inventory.plugins" in UI
+    assert "inventory.hooks" in UI
 
 
 def test_model_picker_marks_native_models_and_forces_work():
@@ -51,6 +90,8 @@ def test_native_workspace_syncs_with_new_and_live_sessions():
     assert "S._pendingNativeWorkspaceId" in SESSIONS
     assert "'/api/session/update'" in UI
     assert "native_workspace_id:workspaceId" in UI
+    assert "reqBody.native_runtime_options" in SESSIONS
+    assert "native_runtime_options:options" in UI
 
 
 def test_native_approvals_and_multi_question_input_use_existing_cards():
@@ -64,6 +105,7 @@ def test_native_approvals_and_multi_question_input_use_existing_cards():
 def test_native_runtime_controls_have_disclosure_and_status_semantics():
     assert 'id="nativeRuntimeStatus" role="status" aria-live="polite"' in HTML
     assert 'id="nativeRuntimeFeatures" role="region"' in HTML
+    assert 'aria-label="Connected Codex tools and extensions"' in HTML
     assert 'aria-controls="nativeRuntimeFeatures"' in HTML
     assert "panel.setAttribute('aria-hidden',open?'false':'true')" in UI
     assert "event.key!=='Escape'" in UI

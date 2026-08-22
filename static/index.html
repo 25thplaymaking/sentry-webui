@@ -517,12 +517,54 @@
         <span class="native-runtime-status" id="nativeRuntimeStatus" role="status" aria-live="polite"></span>
       </div>
       <label class="native-workspace-control" for="nativeWorkspaceSelect">
-        <span>Workspace on your machine</span>
+        <span>Workspace</span>
         <select id="nativeWorkspaceSelect" onchange="selectNativeWorkspace(this.value)" aria-label="Local Codex workspace" aria-describedby="nativeRuntimeStatus"></select>
       </label>
+      <div class="native-runtime-controls" id="nativeRuntimeControls" aria-label="Codex controls">
+        <label class="native-runtime-control" for="nativeActionSelect">
+          <span>Action</span>
+          <select id="nativeActionSelect" onchange="selectNativeRuntimeOption('action',this.value)">
+            <option value="turn">Work task</option>
+            <option value="review">Review changes</option>
+          </select>
+        </label>
+        <label class="native-runtime-control" for="nativeCollaborationModeSelect">
+          <span>Mode</span>
+          <select id="nativeCollaborationModeSelect" onchange="selectNativeRuntimeOption('collaboration_mode',this.value)">
+            <option value="default">Build</option>
+            <option value="plan">Plan first</option>
+          </select>
+        </label>
+        <label class="native-runtime-control" for="nativeEffortSelect">
+          <span>Reasoning</span>
+          <select id="nativeEffortSelect" onchange="selectNativeRuntimeOption('effort',this.value||null)"></select>
+        </label>
+        <label class="native-runtime-control" for="nativeSandboxSelect">
+          <span>Files</span>
+          <select id="nativeSandboxSelect" onchange="selectNativeRuntimeOption('sandbox',this.value)">
+            <option value="workspaceWrite">Can edit</option>
+            <option value="readOnly">Read only</option>
+          </select>
+        </label>
+        <label class="native-runtime-control native-personality-control" id="nativePersonalityControl" for="nativePersonalitySelect">
+          <span>Style</span>
+          <select id="nativePersonalitySelect" onchange="selectNativeRuntimeOption('personality',this.value)">
+            <option value="pragmatic">Pragmatic</option>
+            <option value="friendly">Friendly</option>
+            <option value="none">Neutral</option>
+          </select>
+        </label>
+        <label class="native-runtime-control" for="nativeApprovalSelect">
+          <span>Approvals</span>
+          <select id="nativeApprovalSelect" onchange="selectNativeRuntimeOption('approval_policy',this.value)">
+            <option value="on-request">Ask when needed</option>
+            <option value="untrusted">Ask for untrusted</option>
+          </select>
+        </label>
+      </div>
       <div class="native-runtime-features-wrap">
-        <button type="button" class="native-runtime-features-btn" id="nativeRuntimeFeaturesBtn" aria-expanded="false" aria-controls="nativeRuntimeFeatures" onclick="toggleNativeRuntimeFeatures(event)">Codex features <svg class="native-runtime-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg></button>
-        <div class="native-runtime-features" id="nativeRuntimeFeatures" role="region" aria-label="Native Codex features" aria-hidden="true" tabindex="-1" hidden></div>
+        <button type="button" class="native-runtime-features-btn" id="nativeRuntimeFeaturesBtn" aria-expanded="false" aria-controls="nativeRuntimeFeatures" onclick="toggleNativeRuntimeFeatures(event)">Tools &amp; extensions <span class="native-runtime-count" id="nativeRuntimeInventoryCount"></span><svg class="native-runtime-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg></button>
+        <div class="native-runtime-features" id="nativeRuntimeFeatures" role="region" aria-label="Connected Codex tools and extensions" aria-hidden="true" hidden></div>
       </div>
     </div>
     <div class="messages-shell">
@@ -1999,6 +2041,51 @@
     </div>
   </div>
 </div>
+<dialog class="sentry-work-dialog" id="sentryWorkOrderDialog" aria-labelledby="sentryWorkOrderDialogTitle">
+  <form method="dialog" class="sentry-work-dialog-shell" onsubmit="event.preventDefault();submitSentryWorkOrderCreate()">
+    <div class="feature-guide-head">
+      <div>
+        <div class="feature-guide-kicker">Sentry work order</div>
+        <h2 id="sentryWorkOrderDialogTitle">Create work order</h2>
+      </div>
+      <button type="button" class="feature-guide-close" onclick="closeSentryWorkOrderCreate()" aria-label="Close work-order form">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <label class="sentry-work-field" for="sentryWorkOrderTitle"><span>Title</span><input id="sentryWorkOrderTitle" type="text" maxlength="200" required autocomplete="off" placeholder="What needs to be done?"></label>
+    <label class="sentry-work-field" for="sentryWorkOrderBody"><span>Instructions</span><textarea id="sentryWorkOrderBody" rows="6" maxlength="20000" placeholder="Scope, context, and a clear outcome"></textarea></label>
+    <label class="sentry-work-field" for="sentryWorkOrderMode"><span>Initial access</span><select id="sentryWorkOrderMode"><option value="readOnly">Read only</option><option value="workspaceWrite">Can edit an assigned workspace</option></select></label>
+    <p class="sentry-work-form-note">This creates an audited draft. Sentry will still require a valid assignment, workspace, and state transition before anything executes.</p>
+    <div class="sentry-work-form-error" id="sentryWorkOrderError" role="alert" aria-live="polite"></div>
+    <div class="feature-guide-actions"><button type="button" class="btn secondary" onclick="closeSentryWorkOrderCreate()">Cancel</button><button type="submit" class="btn primary" id="sentryWorkOrderSubmit">Create draft</button></div>
+  </form>
+</dialog>
+<dialog class="feature-guide-dialog" id="featureGuideDialog" aria-labelledby="featureGuideTitle">
+  <div class="feature-guide-shell">
+    <div class="feature-guide-head">
+      <div>
+        <div class="feature-guide-kicker" id="featureGuideKicker">Sentry feature</div>
+        <h2 id="featureGuideTitle"></h2>
+      </div>
+      <button type="button" class="feature-guide-close" onclick="closeFeatureGuide()" aria-label="Close feature guide">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <p class="feature-guide-purpose" id="featureGuidePurpose"></p>
+    <section class="feature-guide-section" aria-labelledby="featureGuideHowTitle">
+      <h3 id="featureGuideHowTitle">How it works</h3>
+      <ol id="featureGuideSteps"></ol>
+    </section>
+    <section class="feature-guide-section" aria-labelledby="featureGuideFaqTitle">
+      <h3 id="featureGuideFaqTitle">FAQ</h3>
+      <div id="featureGuideFaq"></div>
+    </section>
+    <div class="feature-guide-actions">
+      <button type="button" class="btn secondary" onclick="closeFeatureGuide()">Close</button>
+      <button type="button" class="btn primary" id="featureGuideDemoBtn" onclick="runFeatureGuideDemo()">Try it</button>
+    </div>
+  </div>
+</dialog>
 <div id="outlinePanelWrapper" hidden
   role="navigation" aria-label="Conversation outline">
   <div class="outline-header">
