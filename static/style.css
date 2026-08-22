@@ -4929,6 +4929,68 @@ body.resizing .sidebar{transition:none!important;}
    class="main-view", inclusion in the hidden-by-default list, and a
    main.main.showing-<name> > #main<Name> { display:flex } rule. */
 .main-view{flex:1;min-height:0;min-width:0;display:flex;flex-direction:column;background:var(--bg);}
+.experience-bar{
+  position:relative;z-index:45;display:flex;align-items:center;gap:12px;flex:0 0 auto;
+  min-height:52px;padding:8px 20px;border-bottom:1px solid var(--border);
+  background:color-mix(in srgb,var(--bg) 92%,var(--surface));box-sizing:border-box;
+}
+.experience-bar[hidden]{display:none!important;}
+.experience-switch{
+  display:inline-flex;align-items:center;gap:3px;padding:3px;border:1px solid var(--border2);
+  border-radius:10px;background:var(--input-bg);box-shadow:inset 0 1px 0 rgba(255,255,255,.025);
+}
+.experience-switch-btn{
+  display:inline-flex;align-items:center;gap:7px;min-height:32px;padding:6px 12px;border:0;
+  border-radius:7px;background:transparent;color:var(--muted);font:600 12px var(--font-ui);
+  cursor:pointer;transition:background .15s,color .15s,box-shadow .15s;
+}
+.experience-switch-btn:hover{color:var(--text);background:var(--hover-bg);}
+.experience-switch-btn.active{color:var(--text);background:var(--surface);box-shadow:0 1px 5px rgba(0,0,0,.18);}
+.experience-switch-dot{width:6px;height:6px;border-radius:50%;background:currentColor;opacity:.45;}
+.experience-switch-btn.active .experience-switch-dot{background:var(--accent);opacity:1;box-shadow:0 0 0 3px var(--accent-bg);}
+.experience-summary{min-width:0;flex:1;color:var(--muted);font-size:12px;line-height:1.4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.experience-access-wrap{position:relative;flex:0 0 auto;}
+.experience-access-btn{
+  display:inline-flex;align-items:center;gap:6px;min-height:32px;padding:6px 10px;border:1px solid var(--border2);
+  border-radius:8px;background:transparent;color:var(--muted);font:600 11px var(--font-ui);cursor:pointer;
+}
+.experience-access-btn:hover,.experience-access-btn[aria-expanded="true"]{color:var(--text);background:var(--hover-bg);}
+.experience-access-popover{
+  position:absolute;right:0;top:calc(100% + 8px);width:min(360px,calc(100vw - 32px));max-height:min(520px,70vh);
+  overflow:auto;padding:14px;border:1px solid var(--border2);border-radius:12px;background:var(--surface);
+  box-shadow:0 16px 42px rgba(0,0,0,.36);color:var(--text);
+}
+.experience-access-popover[hidden]{display:none!important;}
+.experience-access-title{font-size:13px;font-weight:700;margin-bottom:8px;}
+.experience-access-boundary{padding:9px 10px;border-radius:8px;background:var(--accent-bg);color:var(--muted);font-size:11px;line-height:1.5;}
+.experience-access-section{margin-top:12px;}
+.experience-access-heading{font-size:10px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);}
+.experience-access-section ul{margin:6px 0 0;padding:0;list-style:none;display:grid;gap:5px;}
+.experience-access-section li{position:relative;padding-left:16px;color:var(--text);font-size:11px;line-height:1.45;}
+.experience-access-section li::before{position:absolute;left:0;top:0;color:var(--success);content:'✓';}
+.experience-access-section.is-blocked li{color:var(--muted);}
+.experience-access-section.is-blocked li::before{color:var(--muted);content:'—';}
+.experience-enabled #composerToolsetsWrap{display:none!important;}
+#mainChat[data-experience="chat"] .composer-ws-wrap,
+#mainChat[data-experience="chat"] #composerMobileWorkspaceAction,
+#mainChat[data-experience="chat"] #yoloPill,
+#mainChat[data-experience="chat"] #composerTerminalPanel{display:none!important;}
+body[data-sentry-experience="chat"] #btnWorkspacePanelEdgeToggle,
+body[data-sentry-experience="chat"] .rightpanel,
+body[data-sentry-experience="chat"] .workspace-toggle-btn,
+body[data-sentry-experience="chat"] .mobile-files-btn{display:none!important;}
+.session-experience-badge{
+  flex:0 0 auto;padding:1px 5px;border-radius:999px;border:1px solid var(--border);
+  color:var(--muted);font-size:8px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;
+}
+.session-experience-badge.is-work{color:var(--accent-text);border-color:var(--accent-bg-strong);background:var(--accent-bg);}
+@media(max-width:760px){
+  .experience-bar{min-height:48px;padding:6px 10px;gap:8px;}
+  .experience-summary{display:none;}
+  .experience-access-wrap{margin-left:auto;}
+  .experience-switch-btn{min-height:34px;padding:6px 11px;}
+  .experience-access-popover{right:-2px;}
+}
 main.main > #mainChat,
 main.main > #mainSettings,
 main.main > #mainSkills,
@@ -7343,6 +7405,8 @@ html[data-conversation-outline="enabled"] #outlineToggleBtn:not([hidden]){displa
 }
 .agent-provider-ready.has-error{color:var(--muted);background:var(--surface);}
 .agent-provider-models{margin-top:11px;}
+.agent-provider-model-note{margin-bottom:8px;color:var(--muted);font-size:11px;line-height:1.5;}
+.agent-provider-picker-link{width:100%;}
 .agent-provider-model-label{display:block;margin-bottom:5px;font-size:11px;font-weight:600;color:var(--muted);}
 .agent-provider-model-row{display:flex;flex-direction:column;align-items:stretch;gap:6px;}
 .agent-provider-model-select,.agent-oauth-code-input{

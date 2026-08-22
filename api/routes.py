@@ -10623,8 +10623,14 @@ def _sentry_insights_envelope(usage: dict, *, unavailable: bool = False) -> dict
     }
 
 
-def _sentry_models_envelope(model_ids, *, unavailable: bool = False) -> dict:
-    """Shape the Gateway's flat alias list into the picker's envelope.
+def _sentry_models_envelope(
+    model_ids,
+    *,
+    provider_groups=None,
+    experiences=None,
+    unavailable: bool = False,
+) -> dict:
+    """Shape the Gateway's linked-provider registry into the picker envelope.
 
     The picker reads ``groups: [{provider, provider_id, models: [{id,label}]}]``.
     Aliases are already the operator-facing names configured in Hermes'
@@ -10636,16 +10642,61 @@ def _sentry_models_envelope(model_ids, *, unavailable: bool = False) -> dict:
     would put unreachable options back in the menu, which is the whole defect
     this path replaced.
     """
-    models = [{"id": mid, "label": mid} for mid in model_ids]
-    groups = [{"provider": "Sentry", "provider_id": "sentry", "models": models}] if models else []
+    advertised = {
+        str(mid) for mid in model_ids
+        if isinstance(mid, str) and mid.strip() and str(mid) != "hermes-agent"
+    }
+    groups = []
+    claimed = set()
+    for raw_group in provider_groups or []:
+        if not isinstance(raw_group, dict):
+            continue
+        provider_models = []
+        for raw_model in raw_group.get("models") or []:
+            if not isinstance(raw_model, dict):
+                continue
+            model_id = str(raw_model.get("id") or "").strip()
+            if not model_id or model_id not in advertised or model_id in claimed:
+                continue
+            provider_models.append({
+                "id": model_id,
+                "label": str(raw_model.get("label") or model_id),
+            })
+            claimed.add(model_id)
+        if provider_models:
+            groups.append({
+                "provider": str(raw_group.get("provider") or "Linked account"),
+                # Every option still routes through the Sentry Gateway. group_id
+                # is presentation-only and keeps linked accounts separated.
+                "provider_id": "sentry",
+                "group_id": str(raw_group.get("provider_id") or "sentry"),
+                "models": provider_models,
+            })
+
+    unclaimed = [mid for mid in model_ids if mid in advertised and mid not in claimed]
+    if unclaimed:
+        groups.append({
+            "provider": "Sentry routes",
+            "provider_id": "sentry",
+            "group_id": "sentry",
+            "models": [{"id": mid, "label": mid} for mid in unclaimed],
+        })
     return {
-        "active_provider": "sentry" if models else None,
+        "active_provider": "sentry" if groups else None,
         # The Gateway decides the effective default from the profile's own
         # config; the picker must not assert one the agent has not confirmed.
         "default_model": "",
         "groups": groups,
         "configured_model_badges": {},
         "models_unavailable": bool(unavailable),
+        "catalog_restricted": True,
+        "live_models_disabled": True,
+        "model_scope_note": (
+            "Only models from accounts linked to Sentry are shown. Linked "
+            "accounts provide models; Sentry and Hermes govern skills, plugins, "
+            "memory, workspace, and workstation access."
+        ),
+        "experiences": experiences if isinstance(experiences, dict) else None,
     }
 
 
@@ -13275,7 +13326,11 @@ def handle_get(handler, parsed) -> bool:
                 # models this deployment cannot reach.
                 return j(handler, _sentry_models_envelope([], unavailable=True))
             _ids = [m for m in (_payload.get("models") or []) if isinstance(m, str) and m.strip()]
-            return j(handler, _sentry_models_envelope(_ids))
+            return j(handler, _sentry_models_envelope(
+                _ids,
+                provider_groups=_payload.get("groups"),
+                experiences=_payload.get("experiences"),
+            ))
 
         # Profile-scoping for non-default profiles (#3957) is handled INSIDE
         # get_available_models() — it binds the active profile's env + TLS on
@@ -15070,6 +15125,13 @@ def _validate_session_toolsets_shape(toolsets):
     return toolsets
 
 
+def _validate_session_experience(value, *, default="work"):
+    experience = str(value if value is not None else default).strip().lower()
+    if experience not in {"chat", "work"}:
+        raise ValueError("experience must be 'chat' or 'work'")
+    return experience
+
+
 def _resolve_new_session_workspace(body, visible_prev_session_id):
     """Resolve a new-session workspace, recovering only verified inheritance."""
     candidate = body.get("workspace")
@@ -15459,6 +15521,10 @@ def handle_post(handler, parsed) -> bool:
         )
 
     if parsed.path == "/api/session/new":
+        try:
+            experience = _validate_session_experience(body.get("experience"))
+        except ValueError as e:
+            return bad(handler, str(e), status=400)
         workspace_prev_session_id = body.get("prev_session_id")
         if workspace_prev_session_id and not _session_id_visible_to_request_profile(
             handler, workspace_prev_session_id, emit_error=False
@@ -15582,6 +15648,7 @@ def handle_post(handler, parsed) -> bool:
             project_id=body.get("project_id") or None,
             worktree_info=worktree_info,
             enabled_toolsets=enabled_toolsets,
+            experience=experience,
         )
         if worktree_info:
             publish_session_list_changed(
@@ -15648,6 +15715,7 @@ def handle_post(handler, parsed) -> bool:
                 # re-derive on the next turn.
                 personality=session.personality,
                 enabled_toolsets=getattr(session, "enabled_toolsets", None),
+                experience=getattr(session, "experience", "work"),
                 context_length=getattr(session, "context_length", None),
                 threshold_tokens=getattr(session, "threshold_tokens", None),
                 truncation_watermark=getattr(session, "truncation_watermark", None),
@@ -16541,6 +16609,7 @@ def handle_post(handler, parsed) -> bool:
             project_id=getattr(source, "project_id", None),
             personality=getattr(source, "personality", None),
             enabled_toolsets=getattr(source, "enabled_toolsets", None),
+            experience=getattr(source, "experience", "work"),
             context_length=getattr(source, "context_length", None),
             threshold_tokens=getattr(source, "threshold_tokens", None),
             # context_messages — truncated to fork prefix (not full parent copy)
@@ -24462,6 +24531,7 @@ def _handle_session_compression_recovery_start(handler, body):
                 session_source="fork",
                 personality=getattr(source, "personality", None),
                 enabled_toolsets=copy.deepcopy(getattr(source, "enabled_toolsets", None)),
+                experience=getattr(source, "experience", "work"),
                 context_length=getattr(source, "context_length", None),
                 threshold_tokens=getattr(source, "threshold_tokens", None),
                 gateway_routing=copy.deepcopy(getattr(source, "gateway_routing", None)),

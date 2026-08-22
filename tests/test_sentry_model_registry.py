@@ -28,6 +28,45 @@ class TestEnvelopeShape:
         group = env["groups"][0]
         assert group["provider"] and group["provider_id"]
 
+    def test_linked_accounts_keep_separate_sections_but_share_sentry_routing(self):
+        env = routes._sentry_models_envelope(
+            ["deepseek-v4-flash", "chatgpt-plan/gpt-5.6-sol"],
+            provider_groups=[
+                {
+                    "provider": "Nous Research",
+                    "provider_id": "nous",
+                    "models": [{"id": "deepseek-v4-flash", "label": "DeepSeek V4 Flash"}],
+                },
+                {
+                    "provider": "OpenAI Codex",
+                    "provider_id": "openai-codex",
+                    "models": [{"id": "chatgpt-plan/gpt-5.6-sol", "label": "GPT-5.6 Sol"}],
+                },
+            ],
+        )
+        assert [group["provider"] for group in env["groups"]] == [
+            "Nous Research",
+            "OpenAI Codex",
+        ]
+        assert [group["group_id"] for group in env["groups"]] == [
+            "nous",
+            "openai-codex",
+        ]
+        assert {group["provider_id"] for group in env["groups"]} == {"sentry"}
+
+    def test_disconnected_provider_section_is_absent(self):
+        env = routes._sentry_models_envelope(
+            ["deepseek-v4-flash"],
+            provider_groups=[
+                {
+                    "provider": "Nous Research",
+                    "provider_id": "nous",
+                    "models": [{"id": "deepseek-v4-flash", "label": "DeepSeek V4 Flash"}],
+                }
+            ],
+        )
+        assert all(group["group_id"] != "xai-oauth" for group in env["groups"])
+
     def test_aliases_are_used_verbatim(self):
         """No relabeling: the operator's configured alias is what gets picked."""
         env = routes._sentry_models_envelope(["some-odd_alias.v2"])

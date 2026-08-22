@@ -1419,6 +1419,12 @@ async function newSession(flash, options={}){
       workspace:inheritWs,
       profile:S.activeProfile||'default',
     };
+    const requestedExperience=(options&&Object.prototype.hasOwnProperty.call(options,'experience'))
+      ? options.experience
+      : ((S.session&&S.session.experience)||S._pendingExperience||'chat');
+    reqBody.experience=(typeof _normalizeExperience==='function')
+      ? _normalizeExperience(requestedExperience)
+      : (String(requestedExperience||'').toLowerCase()==='chat'?'chat':'work');
     if(S.session&&S.session.session_id){
       reqBody.prev_session_id=S.session.session_id;
       if(sessionWs) reqBody.workspace_inherited_from_prev_session=true;
@@ -1507,6 +1513,7 @@ async function newSession(flash, options={}){
     }
     S.session=data.session;if(typeof _adoptRegenerationRevision==='function') _adoptRegenerationRevision(data.session);S.messages=data.session.messages||[];
     S._pendingSessionToolsets=null;
+    S._pendingExperience=(data.session&&data.session.experience)||reqBody.experience;
     if(_sessionSourceFilter==='cli') _sessionSourceFilter='webui';
     if(typeof _hydrateTodosFromSession==='function') _hydrateTodosFromSession(S.session);
     S.lastUsage={...(data.session.last_usage||{})};
@@ -1988,6 +1995,7 @@ async function loadSession(sid){
     return loadSession(continuationSid,{...opts,skipLineageResolve:true,skipContinuationResolve:true,force:true,_preloadNotified:true});
   }
   S.session=data.session;
+  S._pendingExperience=(data.session&&data.session.experience)||'work';
   if(typeof _adoptRegenerationRevision==='function') _adoptRegenerationRevision(data.session);
   if(typeof _clearEmptyComposerModelOverride==='function') _clearEmptyComposerModelOverride();
   // Loading a real existing session abandons any pre-session toolset override
@@ -8187,6 +8195,14 @@ function renderSessionListFromCache(){
     ts.className='session-time'+(hasAttentionState?' is-hidden':'');
     ts.textContent=hasAttentionState?'':_formatRelativeSessionTime(tsMs);
     titleRow.appendChild(title);
+    if(window._experiencePolicies){
+      const lane=(String(s.experience||'work').toLowerCase()==='chat')?'chat':'work';
+      const badge=document.createElement('span');
+      badge.className=`session-experience-badge is-${lane}`;
+      badge.textContent=lane;
+      badge.title=lane==='chat'?'Conversational assistant session':'Workspace and tool-enabled session';
+      titleRow.appendChild(badge);
+    }
     // Project color dot: placed BETWEEN title and timestamp, not inside the
     // title span. Inside the title span it would be clipped by the ellipsis
     // truncation, becoming invisible exactly when the title is long enough

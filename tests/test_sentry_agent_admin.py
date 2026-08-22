@@ -296,7 +296,7 @@ def test_agent_admin_ui_has_no_server_command_fallback():
     assert "Open sign-in page" in source
 
 
-def test_connected_subscription_can_select_a_model_without_changing_deepseek_on_render():
+def test_connected_subscription_routes_model_choice_to_chat_work_picker_without_changing_deepseek():
     node = shutil.which("node")
     if not node:
         pytest.skip("node is required for the subscription UI behavior test")
@@ -309,13 +309,15 @@ const nodes = {{
   agentAdminProviders: {{innerHTML: ''}},
   agentAdminOAuthBox: {{style: {{}}, innerHTML: ''}},
 }};
-let picked = [];
 let refreshed = 0;
+let opened = 0;
+let panels = [];
 global.window = global;
 global.document = {{getElementById: id => nodes[id] || null}};
 global.S = {{session: {{model: 'deepseek-v4-flash', model_provider: 'sentry'}}}};
 global.populateModelDropdown = async () => {{ refreshed += 1; }};
-global.selectModelFromDropdown = async (model, provider) => picked.push([model, provider]);
+global.toggleModelDropdown = () => {{ opened += 1; }};
+global.switchPanel = panel => panels.push(panel);
 global.showToast = () => {{}};
 vm.runInThisContext(source, {{filename: 'agent_admin.js'}});
 const payload = {{available: true, providers: [{{
@@ -327,22 +329,25 @@ const payload = {{available: true, providers: [{{
   ],
 }}]}};
 const html = _aaRenderProviders(payload);
-nodes[agentAdminProviderSelectId('openai-codex')] = {{value: 'chatgpt-plan/gpt-5.6-sol'}};
 (async () => {{
-  const before = picked.length;
-  await agentAdminUseProviderModel('openai-codex');
-  process.stdout.write(JSON.stringify({{html, before, picked, refreshed}}));
+  const before = S.session.model;
+  agentAdminOpenModelPicker();
+  await Promise.resolve();
+  process.stdout.write(JSON.stringify({{html, before, after: S.session.model, refreshed, opened, panels}}));
 }})().catch(error => {{ console.error(error); process.exit(1); }});
 """
     result = subprocess.run(
         [node, "-e", driver], capture_output=True, text=True, check=True
     )
     data = json.loads(result.stdout)
-    assert data["before"] == 0, "rendering must leave DeepSeek selected"
-    assert "Use in chat" in data["html"]
-    assert "gpt-5.6-sol" in data["html"]
-    assert data["picked"] == [["chatgpt-plan/gpt-5.6-sol", "sentry"]]
+    assert data["before"] == "deepseek-v4-flash"
+    assert data["after"] == "deepseek-v4-flash", "opening subscriptions must leave DeepSeek selected"
+    assert "Choose in Chat or Work" in data["html"]
+    assert "Use in chat" not in data["html"]
+    assert "<select" not in data["html"]
     assert data["refreshed"] == 1
+    assert data["opened"] == 1
+    assert data["panels"] == ["chat"]
 
 
 class TestLogout:

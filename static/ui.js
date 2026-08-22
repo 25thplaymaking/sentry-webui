@@ -5,7 +5,7 @@
 // legacy reverse-scan over S.messages — that keeps new clients working
 // against old servers (Phase 1 may not yet be deployed everywhere).
 // See api/todo_state.py for the wire contract.
-const S={session:null,messages:[],entries:[],busy:false,pendingFiles:[],toolCalls:[],activeStreamId:null,currentDir:'.',activeProfile:'default',activeProfileIsDefault:true,showHiddenWorkspaceFiles:false,todos:[],todoStateMeta:null,_pendingSessionToolsets:null};
+const S={session:null,messages:[],entries:[],busy:false,pendingFiles:[],toolCalls:[],activeStreamId:null,currentDir:'.',activeProfile:'default',activeProfileIsDefault:true,showHiddenWorkspaceFiles:false,todos:[],todoStateMeta:null,_pendingSessionToolsets:null,_pendingExperience:'chat'};
 
 function assistantDisplayName(){
   if(S.activeProfile&&S.activeProfile!=='default') return S.activeProfile.charAt(0).toUpperCase()+S.activeProfile.slice(1);
@@ -3582,6 +3582,10 @@ async function populateModelDropdown(opts={}){
     window._activeProvider=data.active_provider||null;
     window._defaultModel=data.default_model||null;
     window._configuredModelBadges=data.configured_model_badges||{};
+    window._experiencePolicies=(data.experiences&&typeof data.experiences==='object')?data.experiences:null;
+    window._modelCatalogRestricted=Boolean(data.catalog_restricted);
+    window._modelScopeNote=String(data.model_scope_note||'');
+    if(typeof syncExperienceBar==='function') syncExperienceBar();
     window._modelEndpointErrors={};
     // Keep g.extra_models label hydration in this function for /model and tail selections.
 
@@ -3621,13 +3625,19 @@ async function populateModelDropdown(opts={}){
       return groups;
     };
 
-    const usedConfiguredFallback=!(Array.isArray(data.groups)&&data.groups.length);
-    const groups=usedConfiguredFallback
-      ? _synthGroupsFromConfigured()
-      : data.groups;
+    const restrictedCatalog=Boolean(data.catalog_restricted);
+    const usedConfiguredFallback=!restrictedCatalog&&!(Array.isArray(data.groups)&&data.groups.length);
+    const groups=restrictedCatalog
+      ? (Array.isArray(data.groups)?data.groups:[])
+      : (usedConfiguredFallback?_synthGroupsFromConfigured():data.groups);
     const willRetry=usedConfiguredFallback && requestedFreshness!=='session_visit' && !_modelCatalogFallbackRetried;
 
     if(!groups.length){
+      if(restrictedCatalog){
+        sel.innerHTML='';
+        if(typeof syncModelChip==='function') syncModelChip();
+        return;
+      }
       if(willRetry){
         _modelCatalogFallbackRetried=true;
         populateModelDropdown({...opts,freshness:'session_visit'}).catch(()=>{});
@@ -3642,6 +3652,7 @@ async function populateModelDropdown(opts={}){
       const og=document.createElement('optgroup');
       og.label=g.provider;
       if(g.provider_id) og.dataset.provider=g.provider_id;
+      if(g.group_id) og.dataset.groupId=g.group_id;
       if(g.models_endpoint_error){
         const errorKey=g.provider_id||g.provider||'';
         og.dataset.modelsEndpointError=JSON.stringify(g.models_endpoint_error);
@@ -3685,7 +3696,7 @@ async function populateModelDropdown(opts={}){
     }
     // Kick off a background live-model fetch for the active provider.
     // This runs after the static list is already shown (no blocking flicker).
-    if(data.active_provider && !willRetry) _fetchLiveModels(data.active_provider, sel, requestSeq);
+    if(data.active_provider && !data.live_models_disabled && !willRetry) _fetchLiveModels(data.active_provider, sel, requestSeq);
     if(willRetry){
       _modelCatalogFallbackRetried=true;
       populateModelDropdown({...opts,freshness:'session_visit'}).catch(()=>{});
@@ -4321,7 +4332,7 @@ function renderModelDropdown(){
   for(const child of Array.from(sel.children)){
     if(child.tagName==='OPTGROUP'){
       const providerId=child.dataset&&child.dataset.provider?child.dataset.provider:'';
-      const groupKey=providerId||child.label||`group-${_groupOrder.length}`;
+      const groupKey=(child.dataset&&child.dataset.groupId)||providerId||child.label||`group-${_groupOrder.length}`;
       const groupMeta=_ensureGroupMeta(groupKey,child.label||'',providerId,child);
       let modelsEndpointError=null;
       if(child.dataset&&child.dataset.modelsEndpointError){
@@ -4384,7 +4395,7 @@ function renderModelDropdown(){
   // Create search input FIRST before filterModels definition
   const _scopeNote=document.createElement('div');
   _scopeNote.className='model-scope-note';
-  _scopeNote.textContent=opts.scopeNoteText||(t('model_scope_advisory')||'Applies to this conversation from your next message.');
+  _scopeNote.textContent=opts.scopeNoteText||window._modelScopeNote||(t('model_scope_advisory')||'Applies to this conversation from your next message.');
   const _searchRow=document.createElement('div');
   _searchRow.className='model-search-row';
   _searchRow.innerHTML=`<input class="model-search-input" type="text" placeholder="${esc(t('model_search_placeholder')||'Search models…')}" spellcheck="false" autocomplete="off"><button class="model-search-clear" title="Clear search">${li('x',10)}</button>`;
@@ -4622,8 +4633,10 @@ function renderModelDropdown(){
     dd.innerHTML='';
     dd.appendChild(_scopeNote);
     dd.appendChild(_searchRow);
-    dd.appendChild(_custSep);
-    dd.appendChild(_custRow);
+    if(!window._modelCatalogRestricted){
+      dd.appendChild(_custSep);
+      dd.appendChild(_custRow);
+    }
     if(configuredModels.length){
       const configuredHeading=document.createElement('div');
       configuredHeading.className='model-group';
@@ -4713,7 +4726,10 @@ function renderModelDropdown(){
           heading.classList.toggle('open',closed);
         });
         const useSubGroups=(
-          SUB_GROUP_PROVIDERS.has(meta.providerId) &&
+          // Sentry routes every linked-account choice through its own gateway,
+          // so providerId is intentionally "sentry" there.  groupKey keeps the
+          // linked account identity (for example "nous") for presentation.
+          SUB_GROUP_PROVIDERS.has(String(meta.key||meta.providerId||'').toLowerCase()) &&
           groupRows.length>=SUB_GROUP_MIN_MODELS
         );
         if(useSubGroups){
@@ -4842,8 +4858,10 @@ function renderModelDropdown(){
   _ci.addEventListener('click',e=>e.stopPropagation());
   dd.appendChild(_scopeNote);
   dd.appendChild(_searchRow);
-  dd.appendChild(_custSep);
-  dd.appendChild(_custRow);
+  if(!window._modelCatalogRestricted){
+    dd.appendChild(_custSep);
+    dd.appendChild(_custRow);
+  }
   _filterModels('');
 }
 
@@ -10970,6 +10988,139 @@ async function checkInflightOnBoot(sid) {
   } catch(e) { clearInflight(); }
 }
 
+function _experiencePolicyItems(){
+  const policies=window._experiencePolicies;
+  return (policies&&Array.isArray(policies.items))?policies.items:[];
+}
+function _normalizeExperience(value){
+  return String(value||'').trim().toLowerCase()==='chat'?'chat':'work';
+}
+function _currentExperience(){
+  if(S.session&&S.session.experience) return _normalizeExperience(S.session.experience);
+  if(S._pendingExperience) return _normalizeExperience(S._pendingExperience);
+  const policies=window._experiencePolicies;
+  return _normalizeExperience((policies&&policies.default)||'chat');
+}
+function _setExperienceAccessOpen(open){
+  const popover=$('experienceAccessPopover');
+  const trigger=$('experienceAccessBtn');
+  if(popover) popover.hidden=!open;
+  if(trigger) trigger.setAttribute('aria-expanded',open?'true':'false');
+}
+function toggleExperienceAccess(event){
+  if(event&&typeof event.stopPropagation==='function') event.stopPropagation();
+  const popover=$('experienceAccessPopover');
+  _setExperienceAccessOpen(Boolean(popover&&popover.hidden));
+}
+function _renderExperienceAccess(item,policies){
+  const content=$('experienceAccessContent');
+  if(!content||!item) return;
+  content.innerHTML='';
+  const boundary=document.createElement('div');
+  boundary.className='experience-access-boundary';
+  boundary.textContent=String((policies&&policies.boundary_note)||'Linked accounts provide models. Sentry and Hermes govern capabilities.');
+  content.appendChild(boundary);
+  const addSection=(title,values,tone)=>{
+    if(!Array.isArray(values)||!values.length) return;
+    const section=document.createElement('section');
+    section.className=`experience-access-section ${tone||''}`.trim();
+    const heading=document.createElement('div');
+    heading.className='experience-access-heading';
+    heading.textContent=title;
+    section.appendChild(heading);
+    const list=document.createElement('ul');
+    for(const value of values){
+      const row=document.createElement('li');
+      row.textContent=String(value);
+      list.appendChild(row);
+    }
+    section.appendChild(list);
+    content.appendChild(section);
+  };
+  addSection(item.id==='chat'?'Available in Chat':'Available in Work',item.available,'is-available');
+  addSection('Not available in Chat',item.blocked,'is-blocked');
+}
+function syncExperienceBar(){
+  const bar=$('experienceBar');
+  const main=$('mainChat');
+  if(!bar||!main) return;
+  const policies=window._experiencePolicies;
+  const items=_experiencePolicyItems();
+  const enabled=items.some(item=>item&&item.id==='chat')&&items.some(item=>item&&item.id==='work');
+  bar.hidden=!enabled;
+  main.classList.toggle('experience-enabled',enabled);
+  if(!enabled){
+    main.removeAttribute('data-experience');
+    if(document.body) document.body.removeAttribute('data-sentry-experience');
+    return;
+  }
+  const mode=_currentExperience();
+  main.dataset.experience=mode;
+  if(document.body) document.body.dataset.sentryExperience=mode;
+  const item=items.find(candidate=>candidate&&candidate.id===mode)||items[0];
+  for(const button of bar.querySelectorAll('[data-experience]')){
+    const selected=button.dataset.experience===mode;
+    button.classList.toggle('active',selected);
+    button.setAttribute('aria-selected',selected?'true':'false');
+    button.setAttribute('aria-pressed',selected?'true':'false');
+    button.tabIndex=selected?0:-1;
+  }
+  const summary=$('experienceSummary');
+  if(summary) summary.textContent=String((item&&item.summary)||'');
+  _renderExperienceAccess(item,policies);
+
+  const msg=$('msg');
+  if(msg) msg.placeholder=mode==='chat'?'Message Hermes…':'Ask Hermes to work…';
+  const empty=$('emptyState');
+  if(empty){
+    const title=empty.querySelector('h2');
+    const subtitle=empty.querySelector('p');
+    if(title) title.textContent=mode==='chat'?'Talk with Hermes':'What should Hermes work on?';
+    if(subtitle) subtitle.textContent=mode==='chat'
+      ?'Chat, plan, research, and think together without workspace or coding actions.'
+      :'Use your workspace, tools, plugins, and connected workstation for multi-step work.';
+    const suggestions=Array.from(empty.querySelectorAll('.suggestion'));
+    const copy=mode==='chat'
+      ?[
+          ['Help me plan my day.','Help me plan my day.'],
+          ['Research a topic with me.','Research a topic with me.'],
+          ['Help me think through a decision.','Help me think through a decision.'],
+        ]
+      :[
+          ['What files are in this workspace?','What files are in this workspace?'],
+          ["What's on my schedule today?","What's on my schedule today?"],
+          ['Help me plan and execute a small project.','Help me plan and execute a small project.'],
+        ];
+    suggestions.forEach((button,index)=>{
+      if(!copy[index]) return;
+      button.dataset.msg=copy[index][0];
+      const label=button.querySelector('span');
+      if(label) label.textContent=copy[index][1];
+    });
+  }
+}
+async function selectExperience(value){
+  const next=_normalizeExperience(value);
+  const current=_currentExperience();
+  _setExperienceAccessOpen(false);
+  if(next===current) return;
+  if(S.busy){
+    if(typeof showToast==='function') showToast('Wait for the current response to finish before switching.',2500);
+    return;
+  }
+  S._pendingExperience=next;
+  syncExperienceBar();
+  if(!S.session) return;
+  try{
+    await newSession(true,{experience:next});
+  }catch(error){
+    S._pendingExperience=current;
+    syncExperienceBar();
+    if(typeof showToast==='function') showToast('Could not switch modes. Try again.',2500,'error');
+    throw error;
+  }
+}
+
 function _topbarLoadedMessageCount(){
   const messages=Array.isArray(S.messages)?S.messages:[];
   return messages.filter(m=>m&&m.role&&m.role!=='tool').length;
@@ -10989,6 +11140,7 @@ function _topbarMessageMetaText(){
   return t('n_messages',loadedCount);
 }
 function syncTopbar(){
+  if(typeof syncExperienceBar==='function') syncExperienceBar();
   if(!S.session){
     document.title=assistantDisplayName();
     if(typeof syncWorkspaceDisplays==='function') syncWorkspaceDisplays();

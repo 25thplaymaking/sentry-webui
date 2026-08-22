@@ -640,6 +640,7 @@ def _state_db_row_to_sidecar(row: dict) -> dict:
         'source_tag': source or None,
         **source_meta,
         'enabled_toolsets': None,
+        'experience': 'work',
         'composer_draft': {},
         'messages': messages,
         'tool_calls': [],

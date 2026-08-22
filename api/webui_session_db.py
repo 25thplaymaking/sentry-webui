@@ -73,6 +73,7 @@ _METADATA_FIELDS = frozenset(
         "source_label",
         "read_only",
         "enabled_toolsets",
+        "experience",
         "composer_draft",
     }
 )

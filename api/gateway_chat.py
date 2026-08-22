@@ -531,6 +531,7 @@ def _run_sentry_turn_streaming(
     quoted_context=None,
     timeout=None,
     model=None,
+    experience="work",
 ):
     """Bridge one WebUI turn through the Sentry Gateway ``/api/chat/turn``.
 
@@ -545,7 +546,14 @@ def _run_sentry_turn_streaming(
     headers = {"Content-Type": "application/json", "Accept": "text/event-stream"}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
-    body: dict[str, Any] = {"prompt": str(msg_text or ""), "session_id": session_id}
+    lane = str(experience or "work").strip().lower()
+    if lane not in {"chat", "work"}:
+        lane = "work"
+    body: dict[str, Any] = {
+        "prompt": str(msg_text or ""),
+        "session_id": session_id,
+        "experience": lane,
+    }
     if quoted_context:
         body["quoted_context"] = list(quoted_context)
     # Only sent when the user actually picked one. Omitting the key keeps the
@@ -1397,6 +1405,7 @@ def _run_gateway_chat_streaming(
                     put_gateway_event=put_gateway_event,
                     cancel_event=cancel_event,
                     model=model,
+                    experience=getattr(s, "experience", "work"),
                 )
             except Exception as exc:
                 error_payload = _settle_gateway_terminal_error(

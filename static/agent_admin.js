@@ -184,37 +184,27 @@ function _aaRenderProviders(payload) {
     const models = Array.isArray(p.models)
       ? p.models.filter(m => m && m.id && m.model)
       : [];
-    const currentModel = (typeof S !== 'undefined' && S.session)
-      ? String(S.session.model || '')
-      : '';
-    const current = models.some(m => String(m.id) === currentModel);
     const count = models.length;
     const modelWord = count === 1 ? 'model' : 'models';
-    const selectId = agentAdminProviderSelectId(p.id);
 
     if (p.authenticated) {
       const routeError = String(p.route_error || '').trim();
       const ready = !routeError && count > 0;
-      const options = models.map(m => {
-        const selected = String(m.id) === currentModel ? ' selected' : '';
-        return `<option value="${_aaEsc(m.id)}"${selected}>${_aaEsc(m.model)}</option>`;
-      }).join('');
       const modelControl = routeError || !count
         ? `<div class="agent-provider-route-error" role="status">
              ${_aaEsc(routeError || 'Connected, but no selectable models were reported.')}
            </div>
            <button class="btn" onclick="loadAgentAdmin()">Try again</button>`
-        : `<label class="agent-provider-model-label" for="${_aaEsc(selectId)}">Choose a model</label>
-           <div class="agent-provider-model-row">
-             <select id="${_aaEsc(selectId)}" class="agent-provider-model-select">${options}</select>
-             <button class="btn" onclick="agentAdminUseProviderModel('${id}')">Use in chat</button>
-           </div>`;
+        : `<div class="agent-provider-model-note">
+             This account’s ${count} ${modelWord} appear in the grouped model picker in both Chat and Work.
+           </div>
+           <button class="btn agent-provider-picker-link" onclick="agentAdminOpenModelPicker()">Choose in Chat or Work</button>`;
       return `<section class="agent-provider-card is-connected" data-provider="${id}">
         <div class="agent-provider-head">
           <div>
             <div class="agent-provider-name">${name}</div>
             <div class="agent-provider-status ${ready ? 'is-ready' : 'is-error'}">
-              ${ready ? ((current ? 'In use' : 'Ready') + ' · ' + count + ' ' + modelWord) : 'Connected · models unavailable'}
+              ${ready ? ('Ready · ' + count + ' ' + modelWord) : 'Connected · models unavailable'}
             </div>
           </div>
           <span class="agent-provider-ready ${ready ? '' : 'has-error'}" aria-label="Connected">${ready ? 'Ready' : 'Connected'}</span>
@@ -245,32 +235,21 @@ function _aaRenderProviders(payload) {
   }).join('');
 }
 
-function agentAdminProviderSelectId(provider) {
-  return `agentAdminModel-${String(provider || '').replace(/[^A-Za-z0-9_-]/g, '-')}`;
-}
-
 function _aaProviderName(provider) {
   const providers = (_agentAdminProvidersPayload && _agentAdminProvidersPayload.providers) || [];
   const match = providers.find(p => String(p.id || '') === String(provider || ''));
   return (match && match.name) || provider || 'account';
 }
 
-async function agentAdminUseProviderModel(provider) {
-  const select = document.getElementById(agentAdminProviderSelectId(provider));
-  const model = select ? String(select.value || '').trim() : '';
-  if (!model) {
-    _aaToast('Choose a model first.');
-    return;
+function agentAdminOpenModelPicker() {
+  if (typeof switchPanel === 'function') switchPanel('chat');
+  if (typeof populateModelDropdown === 'function') {
+    Promise.resolve(populateModelDropdown()).finally(() => {
+      if (typeof toggleModelDropdown === 'function') toggleModelDropdown();
+    });
+  } else if (typeof toggleModelDropdown === 'function') {
+    toggleModelDropdown();
   }
-  if (typeof populateModelDropdown === 'function') await populateModelDropdown();
-  if (typeof selectModelFromDropdown !== 'function') {
-    _aaToast('The model picker is not ready yet. Try again shortly.');
-    return;
-  }
-  await selectModelFromDropdown(model, 'sentry');
-  _aaToast(`Using ${select.options && select.selectedIndex >= 0
-    ? select.options[select.selectedIndex].textContent
-    : model} for this conversation.`);
 }
 
 async function agentAdminStartOAuth(provider) {

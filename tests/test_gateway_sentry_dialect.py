@@ -7,6 +7,7 @@ gateway, since that translation is the load-bearing, easy-to-get-wrong part of
 the chat repoint.
 """
 
+import json
 import threading
 
 import api.gateway_chat as gc
@@ -69,6 +70,23 @@ def _run(monkeypatch, lines, **kwargs):
 
 
 class TestStreaming:
+    def test_selected_experience_is_sent_to_the_gateway(self, monkeypatch):
+        captured = {}
+
+        def _open(req, timeout=None):
+            captured.update(json.loads(req.data.decode("utf-8")))
+            return _DummyResp()
+
+        monkeypatch.setattr(gc.urllib.request, "urlopen", _open)
+        monkeypatch.setattr(gc, "_iter_sse_lines_cancellable", _feed(["data: [DONE]"]))
+        gc._run_sentry_turn_streaming(
+            "sess", "hi", "sid", "http://gw", "key",
+            put_gateway_event=lambda *_: None,
+            cancel_event=threading.Event(),
+            experience="chat",
+        )
+        assert captured["experience"] == "chat"
+
     def test_incremental_messages_accumulate_and_stream_tokens(self, monkeypatch):
         (final_text, _usage), events = _run(monkeypatch, [
             'data: {"type":"message","summary":"He"}',
