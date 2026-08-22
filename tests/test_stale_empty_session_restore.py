@@ -203,10 +203,12 @@ def test_boot_stale_session_clears_loading_placeholder():
     over the fresh composer after loadSession rethrows to boot."""
     block = _boot_saved_session_catch_block()
     clear_saved_idx = block.find("localStorage.removeItem('hermes-webui-session')")
+    missing_gate_idx = block.find("if(e&&e.status===404)")
     find_placeholder_idx = block.find("$('msgInner')")
     clear_placeholder_idx = block.find("innerHTML=''", find_placeholder_idx)
     assert clear_saved_idx >= 0
-    assert find_placeholder_idx > clear_saved_idx
+    assert missing_gate_idx > clear_saved_idx
+    assert find_placeholder_idx > missing_gate_idx
     assert clear_placeholder_idx > find_placeholder_idx
 
 

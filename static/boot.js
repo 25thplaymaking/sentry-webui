@@ -3878,8 +3878,10 @@ window._mirrorSpeechSettingsFromServer=_mirrorSpeechSettingsFromServer;
       // metadata request. A missing saved session rethrows so boot can fall
       // through to the fresh-chat state; clear that placeholder here as part
       // of the same fallback so it cannot remain visible over the empty state.
-      const _failedRestoreMessages=$('msgInner');
-      if(_failedRestoreMessages) _failedRestoreMessages.innerHTML='';
+      if(e&&e.status===404){
+        const _failedRestoreMessages=$('msgInner');
+        if(_failedRestoreMessages) _failedRestoreMessages.innerHTML='';
+      }
     }
   }
   // no saved session - show empty state, wait for user to hit +
