@@ -1,6 +1,9 @@
 """Sentry integrations are persisted contracts and operational UI, not labels."""
 
+import io
+import json
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import api.gateway_chat as gateway_chat
 import api.models as models
@@ -86,3 +89,46 @@ def test_operational_surface_wires_sessions_targets_diffs_github_and_ide():
     assert "Object.keys(S.session.sentry_target).length" in sessions
     assert "updateSentryLiveDiff" in messages
     assert "Provider website chats" in js
+
+
+def test_integration_result_proxy_encodes_the_work_order_without_shadowing(monkeypatch):
+    requested = []
+    monkeypatch.setattr(routes, "_handle_extension_sidecar_proxy", lambda *_: False)
+    monkeypatch.setattr(routes, "_guard_request_session_visibility", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(gateway_chat, "_gateway_dialect", lambda: "sentry")
+    monkeypatch.setattr(gateway_chat, "sentry_access_token_from_handler", lambda _handler: "token")
+
+    import api.sentry_gateway_client as gateway_client
+
+    def get_json(path, token, timeout=0):
+        requested.append((path, token, timeout))
+        return {"terminal": True, "events": []}
+
+    monkeypatch.setattr(gateway_client, "get_json", get_json)
+
+    class Handler:
+        def __init__(self):
+            self.headers = {}
+            self.wfile = io.BytesIO()
+            self.status = None
+
+        def send_response(self, status):
+            self.status = status
+
+        def send_header(self, *_):
+            pass
+
+        def end_headers(self):
+            pass
+
+    work_order_id = "46ded193-7ecb-4305-91bb-7d0b080a20c9"
+    handler = Handler()
+    routes.handle_get(
+        handler,
+        urlsplit(f"/api/sentry/integrations/action?work_order_id={work_order_id}&after=0"),
+    )
+    assert handler.status == 200
+    assert json.loads(handler.wfile.getvalue())["terminal"] is True
+    assert requested == [
+        (f"/api/integrations/actions/{work_order_id}?after=0", "token", 30.0)
+    ]

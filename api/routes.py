@@ -12857,7 +12857,6 @@ def handle_get(handler, parsed) -> bool:
         _login_strings = _LOGIN_LOCALE[
             _resolve_login_locale_key(_lang)
         ]
-        from urllib.parse import quote
         from api.updates import WEBUI_VERSION
         version_token = quote(WEBUI_VERSION, safe="")
         _page = (
@@ -13129,7 +13128,6 @@ def handle_get(handler, parsed) -> bool:
         if sw_path.exists():
             # Inject the current git-derived version as the cache name so the
             # service worker cache busts automatically on every new deploy.
-            from urllib.parse import quote
             from api.updates import WEBUI_VERSION
             version_token = quote(WEBUI_VERSION, safe="")
             text = sw_path.read_text(encoding="utf-8").replace(
