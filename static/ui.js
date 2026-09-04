@@ -609,6 +609,9 @@ function _resetMessageRenderWindow(sid){
   clearVisibleMessageRowCache();
   _clearMessageVirtualHeightCache();
 }
+function _restoreMessageRenderWindowAfterSettledRender(){
+  _messageRenderWindowSize=MESSAGE_RENDER_WINDOW_DEFAULT;
+}
 function _cancelMessageVirtualizedRender(){
   if(_messageVirtualScrollRaf){
     cancelAnimationFrame(_messageVirtualScrollRaf);
@@ -6570,12 +6573,12 @@ if(typeof window!=='undefined'){
   },{capture:true,passive:true});
   let _scrollRaf=0;
   el.addEventListener('scroll',()=>{
-    _scheduleMessageVirtualizedRender();
     if(_messageJumpScrollOwner){
       _scheduleMessageJumpScrollReconcile(_messageJumpScrollOwner.generation);
       return;
     }
     if(_freshProgrammaticScrollActive()) return;
+    _scheduleMessageVirtualizedRender();
     _markMessageVirtualScrollActive();
     cancelAnimationFrame(_scrollRaf);
     _scrollRaf=requestAnimationFrame(()=>{
