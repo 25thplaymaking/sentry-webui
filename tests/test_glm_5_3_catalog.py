@@ -61,41 +61,50 @@ def _isolate_models_cache():
 
 
 def test_glm_5_3_in_provider_models():
-    """GLM-5.3 must appear in the zai provider catalog with the correct label."""
+    """GLM-5.3 and GLM-5.3 Flash must appear in the zai provider catalog with the correct labels."""
     zai_models = cfg._PROVIDER_MODELS.get("zai", [])
     model_ids = [m["id"] for m in zai_models]
     assert "glm-5.3" in model_ids, (
         f"glm-5.3 missing from zai provider models; got {model_ids}"
     )
+    assert "glm-5.3-flash" in model_ids, (
+        f"glm-5.3-flash missing from zai provider models; got {model_ids}"
+    )
 
-    # Verify the exact label
+    # Verify the exact labels
     glm_5_3_entry = [m for m in zai_models if m["id"] == "glm-5.3"]
     assert len(glm_5_3_entry) == 1
-    assert glm_5_3_entry[0]["label"] == "GLM-5.3", (
-        f'Expected label "GLM-5.3", got {glm_5_3_entry[0]["label"]!r}'
-    )
+    assert glm_5_3_entry[0]["label"] == "GLM-5.3"
+
+    glm_5_3_flash_entry = [m for m in zai_models if m["id"] == "glm-5.3-flash"]
+    assert len(glm_5_3_flash_entry) == 1
+    assert glm_5_3_flash_entry[0]["label"] == "GLM-5.3 Flash"
 
 
 def test_glm_5_3_positioned_before_glm_5_2():
-    """GLM-5.3 must appear BEFORE GLM-5.2 (lists are newest-first)."""
+    """GLM-5.3 and GLM-5.3 Flash must appear BEFORE GLM-5.2 (lists are newest-first)."""
     zai_models = cfg._PROVIDER_MODELS.get("zai", [])
     glm_5_3_index = None
+    glm_5_3_flash_index = None
     glm_5_2_index = None
 
     for i, model in enumerate(zai_models):
         if model["id"] == "glm-5.3":
             glm_5_3_index = i
+        elif model["id"] == "glm-5.3-flash":
+            glm_5_3_flash_index = i
         elif model["id"] == "glm-5.2":
             glm_5_2_index = i
     assert glm_5_3_index is not None, "glm-5.3 not found in zai models"
+    assert glm_5_3_flash_index is not None, "glm-5.3-flash not found in zai models"
     assert glm_5_2_index is not None, "glm-5.2 not found in zai models"
-    assert glm_5_3_index < glm_5_2_index, (
-        f"glm-5.3 (index {glm_5_3_index}) must appear before glm-5.2 (index {glm_5_2_index})"
+    assert glm_5_3_index < glm_5_3_flash_index < glm_5_2_index, (
+        f"Ordering must be glm-5.3 ({glm_5_3_index}) < glm-5.3-flash ({glm_5_3_flash_index}) < glm-5.2 ({glm_5_2_index})"
     )
 
 
 def test_glm_5_3_in_fallback_models():
-    """GLM-5.3 must appear in _FALLBACK_MODELS with correct provider and label."""
+    """GLM-5.3 and GLM-5.3 Flash must appear in _FALLBACK_MODELS with correct provider and label."""
     fallback_entries = [m for m in cfg._FALLBACK_MODELS if m["id"] == "zai/glm-5.3"]
     assert len(fallback_entries) == 1, (
         f"Expected exactly one zai/glm-5.3 entry in _FALLBACK_MODELS; "
@@ -110,15 +119,25 @@ def test_glm_5_3_in_fallback_models():
         f'Expected label "GLM-5.3", got {entry["label"]!r}'
     )
 
+    flash_entries = [m for m in cfg._FALLBACK_MODELS if m["id"] == "zai/glm-5.3-flash"]
+    assert len(flash_entries) == 1, (
+        f"Expected exactly one zai/glm-5.3-flash entry in _FALLBACK_MODELS; "
+        f"found {len(flash_entries)}"
+    )
+    assert flash_entries[0]["provider"] == "Z.AI"
+    assert flash_entries[0]["label"] == "GLM-5.3 Flash"
+
 
 def test_glm_5_3_positioned_first_in_zai_fallback_block():
-    """GLM-5.3 must appear as the FIRST Z.AI entry in _FALLBACK_MODELS."""
+    """GLM-5.3 must appear as the FIRST Z.AI entry in _FALLBACK_MODELS, followed by Flash."""
     zai_entries = [m for m in cfg._FALLBACK_MODELS if m["provider"] == "Z.AI"]
-    assert len(zai_entries) > 0, "No Z.AI entries found in _FALLBACK_MODELS"
+    assert len(zai_entries) > 1, "Expected multiple Z.AI entries in _FALLBACK_MODELS"
 
-    first_zai_entry = zai_entries[0]
-    assert first_zai_entry["id"] == "zai/glm-5.3", (
-        f'Expected first Z.AI entry to be "zai/glm-5.3", got {first_zai_entry["id"]!r}'
+    assert zai_entries[0]["id"] == "zai/glm-5.3", (
+        f'Expected first Z.AI entry to be "zai/glm-5.3", got {zai_entries[0]["id"]!r}'
+    )
+    assert zai_entries[1]["id"] == "zai/glm-5.3-flash", (
+        f'Expected second Z.AI entry to be "zai/glm-5.3-flash", got {zai_entries[1]["id"]!r}'
     )
 
 
@@ -141,7 +160,7 @@ def test_zai_onboarding_default_stays_glm_5_1_until_direct_api_serves_glm_5_3():
 
 
 def test_glm_5_3_in_zai_onboarding_models_list():
-    """GLM-5.3 must appear in the zai onboarding setup's models list."""
+    """GLM-5.3 and GLM-5.3 Flash must appear in the zai onboarding setup's models list."""
     zai_setup = onboarding._SUPPORTED_PROVIDER_SETUPS.get("zai", {})
     assert zai_setup, "zai setup not found in _SUPPORTED_PROVIDER_SETUPS"
 
@@ -150,21 +169,27 @@ def test_glm_5_3_in_zai_onboarding_models_list():
     assert "glm-5.3" in model_ids, (
         f"glm-5.3 missing from zai onboarding models list; got {model_ids}"
     )
+    assert "glm-5.3-flash" in model_ids, (
+        f"glm-5.3-flash missing from zai onboarding models list; got {model_ids}"
+    )
 
     # Verify the exact label in the onboarding list
     glm_5_3_entry = [m for m in models if m["id"] == "glm-5.3"]
     assert len(glm_5_3_entry) == 1
-    assert glm_5_3_entry[0]["label"] == "GLM-5.3", (
-        f'Expected label "GLM-5.3" in onboarding, got {glm_5_3_entry[0]["label"]!r}'
-    )
+    assert glm_5_3_entry[0]["label"] == "GLM-5.3"
+
+    glm_5_3_flash_entry = [m for m in models if m["id"] == "glm-5.3-flash"]
+    assert len(glm_5_3_flash_entry) == 1
+    assert glm_5_3_flash_entry[0]["label"] == "GLM-5.3 Flash"
 
 
 def test_glm_5_3_reasoning_efforts():
-    """GLM-5.3 must support the full reasoning_effort ladder (GLM-5.2+ tier)."""
-    efforts = cfg.resolve_model_reasoning_efforts("glm-5.3", provider_id="zai")
-    assert set(efforts) == {"minimal", "low", "medium", "high", "xhigh", "max"}, (
-        f"glm-5.3 must support the full reasoning_effort ladder; got {efforts!r}"
-    )
+    """GLM-5.3 and GLM-5.3 Flash must support the full reasoning_effort ladder (GLM-5.2+ tier)."""
+    for mid in ("glm-5.3", "glm-5.3-flash"):
+        efforts = cfg.resolve_model_reasoning_efforts(mid, provider_id="zai")
+        assert set(efforts) == {"minimal", "low", "medium", "high", "xhigh", "max"}, (
+            f"{mid} must support the full reasoning_effort ladder; got {efforts!r}"
+        )
 
 
 def test_glm_5_3_in_models_payload_for_zai_provider(tmp_path, monkeypatch):
