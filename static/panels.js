@@ -594,6 +594,22 @@ function _resyncChatSidebarAfterPanelSwitch() {
     // this one-shot panel-transition repair.
     if (typeof _sessionActionMenu !== 'undefined' && _sessionActionMenu) return;
     renderSessionListFromCache();
+    // #sentry: ensure sessions are always visible when returning to Chat.
+    // 1. If DOM list has no items, or cache is empty, or there was a load error,
+    //    immediately trigger a non-deferred /api/sessions refetch.
+    // 2. Otherwise, fire a background refresh so any sessions created or updated
+    //    while on another panel are seamlessly picked up.
+    if (typeof renderSessionList === 'function') {
+      const list = typeof $ === 'function' ? $('sessionList') : document.getElementById('sessionList');
+      const listEmpty = !list || !list.querySelector('.session-item');
+      const cacheEmpty = typeof _allSessions !== 'undefined' && Array.isArray(_allSessions) && _allSessions.length === 0;
+      const hasLoadError = typeof _sessionListLoadError !== 'undefined' && !!_sessionListLoadError;
+      if (listEmpty || cacheEmpty || hasLoadError) {
+        void renderSessionList({deferWhileInteracting: false});
+      } else {
+        void renderSessionList({deferWhileInteracting: true});
+      }
+    }
   };
   if (typeof requestAnimationFrame === 'function') requestAnimationFrame(run);
   else run();

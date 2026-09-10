@@ -1399,6 +1399,9 @@ async function newSession(flash, options={}){
   }
   _setNewSessionPending(true);
   _newSessionInFlight=(async()=>{
+    if(typeof closeLinkedProviderSession==='function'){
+      try{ closeLinkedProviderSession(); }catch(_){}
+    }
     // Starting a brand-new chat must not carry named context blocks selected in
     // the previous conversation (#2543). loadSession() clears these on a sidebar
     // switch, but the New Chat path replaces S.session here without going through
@@ -2588,6 +2591,10 @@ async function _ensureSidebarSessionProfile(session){
 
 async function _openSidebarSession(session, loadOpts={}){
   if(!session||!session.session_id) return;
+  // If a linked provider session was open, close it so this conversation is visible.
+  if(typeof closeLinkedProviderSession==='function'){
+    try{ closeLinkedProviderSession(); }catch(_){}
+  }
   // Extension pre-open hook — before any side-effects (external import, profile switching).
   // Handler returns {cancel:true} to prevent the open.
   if(!loadOpts.skipExtHooks && typeof _hermesNotifySessionOpen==='function'){

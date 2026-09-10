@@ -1568,7 +1568,7 @@
   .sidebar-section{padding:14px 14px 8px;}
   .new-chat-btn{width:100%;padding:9px 12px;border-radius:9px;background:var(--accent-bg);border:1px solid var(--accent-bg-strong);color:var(--accent-text);font-size:13px;cursor:pointer;display:flex;align-items:center;gap:8px;transition:all .15s;margin-bottom:8px;font-weight:500;}
   .new-chat-btn:hover{background:var(--accent-bg-strong);border-color:var(--accent);}
-  .session-list{flex:1;overflow-y:auto;padding:0 8px 8px;min-height:0;overscroll-behavior-y:contain;touch-action:pan-y;overflow-anchor:none;}
+  .session-list{flex:1;overflow-y:auto;padding:0 8px 8px;min-height:100px;overscroll-behavior-y:contain;touch-action:pan-y;overflow-anchor:none;}
   .sidebar-search{position:relative;padding:8px 12px;flex-shrink:0;}
   .session-search-field{position:relative;display:flex;align-items:center;width:100%;}
   .sidebar-search input{width:100%;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:7px 10px 7px 32px;font-size:13px;outline:none;transition:border-color .15s,box-shadow .15s,background .15s;box-sizing:border-box;-webkit-appearance:none;appearance:none;}
@@ -7666,14 +7666,20 @@ html[data-conversation-outline="enabled"] #outlineToggleBtn:not([hidden]){displa
 .agent-oauth-close{margin-top:8px;}
 
 /* ── Sentry operational workspace: linked sessions, targets, and inspector ── */
-.linked-session-hub{margin:0 10px 8px;border:1px solid var(--border);border-radius:10px;background:color-mix(in srgb,var(--surface) 74%,transparent);overflow:hidden;flex:0 0 auto;}
+.linked-session-hub{margin:0 10px 8px;border:1px solid var(--border);border-radius:10px;background:color-mix(in srgb,var(--surface) 74%,transparent);overflow:hidden;flex:0 1 auto;max-height:min(260px,34vh);display:flex;flex-direction:column;}
 .linked-session-hub[hidden]{display:none!important;}
-.linked-session-hub-head{display:flex;min-height:34px;align-items:center;justify-content:space-between;padding:0 9px;color:var(--muted);font-size:10px;font-weight:750;letter-spacing:.055em;text-transform:uppercase;}
-.linked-session-hub-head button{display:inline-flex;width:27px;height:27px;align-items:center;justify-content:center;border:0;border-radius:7px;background:transparent;color:var(--muted);cursor:pointer;}
+.linked-session-hub-head{display:flex;min-height:34px;align-items:center;justify-content:space-between;padding:0 9px;color:var(--muted);font-size:10px;font-weight:750;letter-spacing:.055em;text-transform:uppercase;flex-shrink:0;}
+.linked-session-hub-title{cursor:pointer;user-select:none;display:inline-flex;align-items:center;gap:4px;flex:1;}
+.linked-session-hub-title:hover{color:var(--text);}
+.linked-session-hub-caret{display:inline-block;transition:transform .18s ease;font-size:9px;}
+.linked-session-hub.is-collapsed .linked-session-hub-caret{transform:rotate(-90deg);}
+.linked-session-hub.is-collapsed .linked-session-groups,
+.linked-session-hub.is-collapsed .linked-session-boundary{display:none!important;}
+.linked-session-hub-head button{display:inline-flex;width:27px;height:27px;align-items:center;justify-content:center;border:0;border-radius:7px;background:transparent;color:var(--muted);cursor:pointer;flex-shrink:0;}
 .linked-session-hub-head button:hover{background:var(--hover-bg);color:var(--text);}
 .linked-session-hub-head button[aria-busy="true"] svg{animation:sentry-spin .8s linear infinite;}
 @keyframes sentry-spin{to{transform:rotate(360deg)}}
-.linked-session-groups{display:grid;gap:2px;padding:0 5px 5px;}
+.linked-session-groups{display:grid;gap:2px;padding:0 5px 5px;overflow-y:auto;min-height:0;overscroll-behavior-y:contain;}
 .linked-session-group{border-top:1px solid var(--border-subtle);padding-top:4px;}
 .linked-session-group-title{display:flex;align-items:center;justify-content:space-between;padding:5px;color:var(--muted);font-size:10px;font-weight:700;}
 .linked-session-row{display:grid;grid-template-columns:8px minmax(0,1fr) auto;align-items:center;gap:7px;width:100%;padding:7px 6px;border:0;border-radius:7px;background:transparent;color:var(--text);text-align:left;cursor:pointer;}
@@ -7683,7 +7689,7 @@ html[data-conversation-outline="enabled"] #outlineToggleBtn:not([hidden]){displa
 .linked-session-copy{min-width:0;display:flex;flex-direction:column;gap:2px;}
 .linked-session-copy strong{overflow:hidden;font-size:11px;font-weight:620;text-overflow:ellipsis;white-space:nowrap;}
 .linked-session-copy span,.linked-session-time{color:var(--muted);font-size:9px;white-space:nowrap;}
-.linked-session-boundary{padding:7px 9px;border-top:1px solid var(--border-subtle);color:var(--muted);font-size:9px;line-height:1.4;}
+.linked-session-boundary{padding:7px 9px;border-top:1px solid var(--border-subtle);color:var(--muted);font-size:9px;line-height:1.4;flex-shrink:0;}
 
 .provider-session-view{display:flex;min-height:0;flex:1;flex-direction:column;background:var(--bg);}
 .provider-session-view[hidden]{display:none!important;}

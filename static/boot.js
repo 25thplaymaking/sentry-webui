@@ -2089,6 +2089,9 @@ function _currentSessionIsReusableEmptyChat(){
 
 $('fileInput').onchange=e=>{addFiles(Array.from(e.target.files));e.target.value='';};
 $('btnNewChat').onclick=async()=>{
+  if(typeof closeLinkedProviderSession==='function'){
+    try{ closeLinkedProviderSession(); }catch(_){}
+  }
   // If the current session has no messages AND nothing is in flight, just focus
   // the composer rather than creating another empty session that will clutter the
   // sidebar list (#1171).

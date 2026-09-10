@@ -500,9 +500,28 @@ function openCurrentWorkspaceInIde(){
   void openWorkspaceInIde(preferred.id,session&&session.workspace_id,session&&session.node_id);
 }
 
+function toggleLinkedSessionHubCollapse(event){
+  if(event&&event.stopPropagation) event.stopPropagation();
+  const hub=byId('linkedSessionHub');
+  if(!hub) return;
+  const next=!hub.classList.contains('is-collapsed');
+  hub.classList.toggle('is-collapsed', next);
+  try{ localStorage.setItem('sentry-linked-sessions-collapsed', next ? '1' : '0'); }catch(_){}
+}
+
+function syncLinkedSessionHubCollapse(){
+  const hub=byId('linkedSessionHub');
+  if(!hub) return;
+  try{
+    const isCollapsed=localStorage.getItem('sentry-linked-sessions-collapsed')==='1';
+    hub.classList.toggle('is-collapsed', isCollapsed);
+  }catch(_){}
+}
+
 function syncSurface(){
   const sentry=isSentry();const hub=byId('linkedSessionHub'),wrap=byId('sentryTargetWrap'),inspector=byId('sentryInspector');
   if(hub) hub.hidden=!sentry;if(wrap) wrap.hidden=!sentry;if(inspector) inspector.hidden=!sentry;
+  syncLinkedSessionHubCollapse();
   syncTargetChip();renderLinkedSessions();
 }
 
@@ -525,6 +544,7 @@ Object.assign(window,{
   openLinkedProviderSession,
   closeLinkedProviderSession,
   toggleLinkedProviderWatch,
+  toggleLinkedSessionHubCollapse,
   toggleSentryTargetMenu,
   selectSentryTarget,
   selectSentryInspectorTab,
