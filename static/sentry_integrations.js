@@ -312,24 +312,11 @@ function renderTargetOptions(){
   });
 }
 
-async function selectSentryTarget(target){
+async function selectSentryTarget(target,options={}){
   const previous=selectedTarget();
-  const inChat=!!target&&typeof _currentExperience==='function'&&_currentExperience()==='chat';
-  if(inChat){
-    if(typeof S!=='undefined'&&S.busy){toast('Wait for the current response to finish before targeting a machine or service.',true);return;}
-    if(typeof S!=='undefined') S._pendingSentryTarget={...target};
-    syncTargetChip();closeTargetMenu();
-    try{
-      if(typeof selectExperience!=='function') throw new Error('Work mode is unavailable.');
-      await selectExperience('work');
-      if(typeof _currentExperience==='function'&&_currentExperience()!=='work') throw new Error('Work mode did not open.');
-      toast('Opened Work so Hermes can use the selected target.');
-      if(target.kind==='workspace') void inspectCurrentWorkspace();
-      return;
-    }catch(error){
-      if(typeof S!=='undefined') S._pendingSentryTarget=previous||null;
-      syncTargetChip();toast(error&&error.message||'Could not open Work for that target.',true);return;
-    }
+  if(typeof S!=='undefined'&&S.busy){toast('Wait for the current response to finish before targeting a machine or service.',true);return;}
+  if(options&&options.switchToWork){
+    if(typeof selectExperience==='function') await selectExperience('work');
   }
   if(typeof S!=='undefined') S._pendingSentryTarget=target?{...target}:null;
   if(typeof S!=='undefined'&&S.session) S.session.sentry_target=target?{...target}:{};
