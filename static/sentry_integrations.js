@@ -37,8 +37,9 @@ const workspaceForTarget=(target=selectedTarget())=>{
 };
 const currentWorkspace=()=>{
   const target=selectedTarget();
-  if(target&&target.kind==='service') return null;
-  return workspaceForTarget(target)||integrationWorkspaces()[0]||null;
+  // An explicit stale/offline target must never fall through to another machine.
+  if(target) return target.kind==='workspace'?workspaceForTarget(target):null;
+  return integrationWorkspaces()[0]||null;
 };
 const sentryWorkspaceTargetForId=(workspaceId)=>{
   const workspace=integrationWorkspaces().find(item=>String(item.id)===String(workspaceId||''));
@@ -72,7 +73,10 @@ async function runAction(payload,onEvent,{timeout=50000}={}){
       if(typeof onEvent==='function') await onEvent(event,id);
     }
     if(result&&result.terminal){
-      if(result.outcome&&result.outcome!=='succeeded'&&result.state!=='cancelled'){
+      if(result.state==='cancelled'||result.outcome==='cancelled'){
+        throw new Error('The linked-machine action was cancelled; completion was not verified.');
+      }
+      if(result.outcome&&result.outcome!=='succeeded'){
         throw new Error(result.summary||'The linked-machine action failed.');
       }
       return result;
@@ -395,15 +399,33 @@ function renderWorkspaceSnapshot(snapshot){
   renderDiff(snapshot&&snapshot.diff||'');renderGithub();renderIntegrations();
 }
 
+let workspaceInspectEpoch=0;
 async function inspectCurrentWorkspace(){
+  const epoch=++workspaceInspectEpoch;
   const workspace=currentWorkspace();
-  if(!workspace){renderWorkspaceSnapshot(null);return;}
-  const empty=byId('sentryDiffEmpty');if(empty){empty.hidden=false;empty.textContent='Loading the linked workspace diff…';}
+  renderWorkspaceSnapshot(null);
+  if(!workspace) return;
+  const stillCurrent=()=>{
+    const current=currentWorkspace();
+    return epoch===workspaceInspectEpoch&&current&&
+      String(current.node_id)===String(workspace.node_id)&&String(current.id)===String(workspace.id);
+  };
+  const empty=byId('sentryDiffEmpty');
+  if(empty){empty.hidden=false;empty.textContent='Loading the linked workspace diff…';}
+  let received=false;
   try{
     await runAction({action:'workspaceInspect',node_id:workspace.node_id,workspace_id:workspace.id},event=>{
-      if(event&&event.payload&&event.payload.kind==='workspace') renderWorkspaceSnapshot(event.payload);
+      if(stillCurrent()&&event&&event.payload&&event.payload.kind==='workspace'){
+        received=true;renderWorkspaceSnapshot(event.payload);
+      }
     });
-  }catch(error){if(empty){empty.hidden=false;empty.textContent=String(error&&error.message||'Could not load workspace changes.');}toast('Could not inspect the linked workspace.',true);}
+    if(stillCurrent()&&!received) throw new Error('The linked machine returned no workspace snapshot.');
+  }catch(error){
+    if(!stillCurrent()) return;
+    renderWorkspaceSnapshot(null);
+    if(empty){empty.hidden=false;empty.textContent=String(error&&error.message||'Could not load workspace changes.');}
+    toast('Could not inspect the linked workspace.',true);
+  }
 }
 
 function updateSentryLiveDiff(payload){

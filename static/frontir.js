@@ -751,3 +751,25 @@
   if(doc.readyState==='loading') doc.addEventListener('DOMContentLoaded',init);
   else init();
 })();
+
+
+/* Sentry workspace v1: load sibling assets using the existing deployment token. */
+(function () {
+  'use strict';
+  if (document.getElementById('sentryWorkspaceScript')) return;
+  const source = document.currentScript && document.currentScript.src;
+  if (!source) return;
+  const base = new URL(source, location.href);
+  const css = new URL('sentry_workspace.css', base);
+  const js = new URL('sentry_workspace.js', base);
+  css.search = base.search;
+  js.search = base.search;
+  const link = document.createElement('link');
+  link.rel = 'stylesheet'; link.href = css.href; link.id = 'sentryWorkspaceStyle';
+  const script = document.createElement('script');
+  script.src = js.href; script.id = 'sentryWorkspaceScript';
+  script.addEventListener('error', () => {
+    console.error('[sentry-workspace] Could not load the workspace module. Existing panels remain available.');
+  });
+  document.head.append(link, script);
+})();

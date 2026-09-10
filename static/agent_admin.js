@@ -33,7 +33,8 @@ async function _aaConfirm(title, message, confirmLabel) {
       title, message, confirmLabel, danger: true, focusCancel: true,
     });
   }
-  return true;
+  _aaToast('Confirmation is unavailable. Reload before making this change.');
+  return false;
 }
 
 function _aaToast(message) {

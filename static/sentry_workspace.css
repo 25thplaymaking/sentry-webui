@@ -1,0 +1,77 @@
+/* Frontir-only workspace surfaces. Existing skins and upstream panels survive. */
+[data-skin="frontir"] .sw-dialog {
+  --sw-bg: var(--panel-bg, #101013);
+  --sw-fg: var(--text, #f4f3ef);
+  --sw-muted: var(--muted, #a3a3ab);
+  --sw-line: var(--border, rgba(128,128,128,.25));
+  background: var(--sw-bg); color: var(--sw-fg); border: 1px solid var(--sw-line);
+  border-radius: 14px; padding: 0; width: min(1040px, calc(100vw - 48px));
+  max-width: none; height: min(740px, calc(100dvh - 64px)); max-height: none;
+  box-shadow: 0 24px 100px #0006; font: 14px/1.5 system-ui, sans-serif;
+}
+[data-skin="frontir"] .sw-dialog::backdrop { background: #0008; backdrop-filter: blur(3px); }
+[data-skin="frontir"] .sw-dialog * { box-sizing: border-box; }
+[data-skin="frontir"] .sw-dialog[open] { display: flex; flex-direction: column; }
+[data-skin="frontir"] .sw-dialog [hidden] { display: none !important; }
+[data-skin="frontir"] .sw-dialog button,
+[data-skin="frontir"] .sw-dialog input,
+[data-skin="frontir"] .sw-dialog textarea { font: inherit; color: inherit; }
+[data-skin="frontir"] .sw-dialog button {
+  border: 1px solid var(--sw-line); background: transparent; padding: 8px 12px;
+  border-radius: 7px; cursor: pointer; line-height: 1.3; text-align: left;
+}
+[data-skin="frontir"] .sw-dialog button:hover:not(:disabled) { background: var(--hover-bg, #8882); }
+[data-skin="frontir"] .sw-dialog button:disabled { opacity: .45; cursor: not-allowed; }
+[data-skin="frontir"] .sw-dialog :focus-visible { outline: 2px solid var(--info, #69b7ac); outline-offset: 3px; }
+[data-skin="frontir"] .sw-header { padding: 22px 24px 18px; border-bottom: 1px solid var(--sw-line); display: flex; gap: 16px; align-items: center; }
+[data-skin="frontir"] .sw-heading { flex: 1; min-width: 0; }
+[data-skin="frontir"] .sw-heading h2 { margin: 0; font-size: 19px; font-weight: 600; letter-spacing: -.4px; }
+[data-skin="frontir"] .sw-muted { color: var(--sw-muted); font-size: 12px; }
+[data-skin="frontir"] .sw-grid { display: grid; grid-template-columns: 240px minmax(0,1fr); flex: 1; min-height: 0; }
+[data-skin="frontir"] .sw-sidebar { border-right: 1px solid var(--sw-line); padding: 18px 14px; min-height: 0; display: flex; flex-direction: column; gap: 12px; }
+[data-skin="frontir"] .sw-search,
+[data-skin="frontir"] .sw-name { width: 100%; border: 1px solid var(--sw-line); border-radius: 7px; padding: 9px 11px; background: var(--input-bg, transparent); }
+[data-skin="frontir"] .sw-list { overflow: auto; flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 3px; }
+[data-skin="frontir"] .sw-list button { border-color: transparent; display: flex; flex-direction: column; gap: 2px; word-break: break-word; }
+[data-skin="frontir"] .sw-list button[aria-pressed="true"] { background: var(--hover-bg, #8882); border-color: var(--sw-line); }
+[data-skin="frontir"] .sw-editor { display: flex; flex-direction: column; min-width: 0; min-height: 0; padding: 22px 24px; gap: 12px; }
+[data-skin="frontir"] .sw-editor label { font-weight: 550; font-size: 13px; }
+[data-skin="frontir"] .sw-content { flex: 1; min-height: 130px; resize: none; width: 100%; border: 1px solid var(--sw-line); border-radius: 8px; background: var(--input-bg, transparent); padding: 16px; font-size: 14px !important; line-height: 1.7 !important; }
+[data-skin="frontir"] .sw-meta { display: flex; gap: 12px; justify-content: space-between; flex-wrap: wrap; }
+[data-skin="frontir"] .sw-note { margin: 0; color: var(--sw-muted); font-size: 12px; line-height: 1.6; }
+[data-skin="frontir"] .sw-status { min-height: 20px; font-size: 13px; overflow-wrap: anywhere; }
+[data-skin="frontir"] .sw-status[data-state="error"] { color: var(--danger, #ee9692); }
+[data-skin="frontir"] .sw-footer { padding: 14px 24px; border-top: 1px solid var(--sw-line); display: flex; gap: 8px; align-items: center; }
+[data-skin="frontir"] .sw-footer .sw-status { flex: 1; }
+[data-skin="frontir"] .sw-primary { background: var(--sw-fg) !important; color: var(--sw-bg) !important; border-color: transparent !important; text-align: center !important; font-weight: 600 !important; }
+[data-skin="frontir"] .sw-danger { color: var(--danger, #ee9692) !important; }
+[data-skin="frontir"] .sw-palette { width: min(580px, calc(100vw - 32px)); height: auto; max-height: min(560px, calc(100dvh - 64px)); }
+[data-skin="frontir"] .sw-palette-body { padding: 16px; overflow: auto; display: grid; gap: 12px; }
+[data-skin="frontir"] .sw-command { width: 100%; display: flex; justify-content: space-between; gap: 16px; border-color: transparent !important; }
+[data-skin="frontir"] .sw-confirm { width: min(460px, calc(100vw - 32px)); height: auto; padding: 24px; gap: 16px; }
+[data-skin="frontir"] .sw-confirm h2 { font-size: 18px; margin: 0; }
+[data-skin="frontir"] .sw-confirm p { margin: 0; }
+[data-skin="frontir"] .sw-confirm-actions { display: flex; justify-content: flex-end; gap: 8px; }
+[data-skin="frontir"] #sentryDiff { overflow: auto; max-width: 100%; tab-size: 4; line-height: 1.6; }
+[data-skin="frontir"] #sentryInspector { min-width: 0; }
+[data-skin="frontir"] #frontirNav .sw-nav { display: flex; align-items: center; gap: 10px; }
+[data-skin="frontir"] .sw-nav svg { width: 16px; height: 16px; flex: none; }
+@media (max-width: 640px) {
+  [data-skin="frontir"] .sw-dialog:not(.sw-confirm):not(.sw-palette) { width: calc(100vw - 16px); height: calc(100dvh - 16px); border-radius: 10px; }
+  [data-skin="frontir"] .sw-grid { grid-template-columns: 1fr; grid-template-rows: minmax(100px, 26%) minmax(0,1fr); }
+  [data-skin="frontir"] .sw-sidebar { border-right: 0; border-bottom: 1px solid var(--sw-line); display: grid; grid-template-columns: minmax(0,1fr) auto; padding: 12px; gap: 8px; }
+  [data-skin="frontir"] .sw-list { grid-column: 1 / -1; flex-direction: row; overflow: auto; }
+  [data-skin="frontir"] .sw-list button { min-width: 140px; }
+  [data-skin="frontir"] .sw-header { padding: 16px; }
+  [data-skin="frontir"] .sw-editor { padding: 14px 16px; gap: 8px; }
+  [data-skin="frontir"] .sw-footer { padding: 12px 16px; flex-wrap: wrap; }
+  [data-skin="frontir"] .sw-footer .sw-status { flex-basis: 100%; }
+  [data-skin="frontir"] .sw-footer button { min-height: 40px; }
+}
+@media (forced-colors: active) {
+  [data-skin="frontir"] .sw-dialog { border: 2px solid CanvasText; }
+  [data-skin="frontir"] .sw-list button[aria-pressed="true"] { outline: 2px solid Highlight; }
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-skin="frontir"] .sw-dialog, [data-skin="frontir"] .sw-dialog * { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+}
