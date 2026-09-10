@@ -301,6 +301,17 @@ function renderTargetOptions(){
     button.append(document.createTextNode(String(workspace.id)));const meta=document.createElement('span');meta.textContent=String(workspace.node_name||'Linked machine');button.appendChild(meta);
     button.addEventListener('click',()=>selectSentryTarget(target));return button;
   });
+  const wsSection = container.querySelector('.sentry-target-section');
+  if(wsSection){
+    const addBtn=document.createElement('button');addBtn.type='button';addBtn.className='sentry-target-option sentry-target-add-action';
+    addBtn.style.cssText='border-top:1px dashed var(--border);color:var(--accent);margin-top:4px;display:flex;align-items:center;gap:6px;';
+    addBtn.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg><span>+ Add folder / space...</span>';
+    addBtn.addEventListener('click',()=>{
+      closeTargetMenu();
+      if(typeof openWorkspaceCreate==='function') openWorkspaceCreate();
+    });
+    wsSection.appendChild(addBtn);
+  }
   const services=Array.isArray(state.status&&state.status.services&&state.status.services.services)?state.status.services.services:[];
   const nativeCodex=typeof _selectedNativeRuntimeId==='function'&&_selectedNativeRuntimeId()==='codex';
   if(!nativeCodex) addSection('Server services',services,service=>{

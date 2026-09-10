@@ -16482,6 +16482,12 @@ def handle_post(handler, parsed) -> bool:
             s.native_workspace_id = native_workspace_id
             s.native_runtime_options = native_runtime_options
             s.sentry_target = sentry_target
+            if "experience" in body:
+                new_exp = _validate_session_experience(body.get("experience"))
+                if new_exp != getattr(s, "experience", None):
+                    s.experience = new_exp
+                    from api.config import _evict_session_agent
+                    _evict_session_agent(body["session_id"])
             if "model" in body or "model_provider" in body:
                 model, provider = _session_model_state_from_request(
                     body.get("model", s.model),
@@ -26894,6 +26900,36 @@ def _handle_workspace_add(handler, body):
         return bad(handler, "Workspace already in list")
     wss.append({"path": str(p), "name": name or p.name})
     save_workspaces(wss)
+
+    from api.gateway_chat import _gateway_dialect
+    if _gateway_dialect() == "sentry":
+        import os
+        import json
+        import re
+        node_cfg = os.path.expandvars(r"%LOCALAPPDATA%\SentryAssistant\node\state\appsettings.node.json")
+        if os.path.exists(node_cfg):
+            try:
+                with open(node_cfg, "r", encoding="utf-8") as f:
+                    node_data = json.load(f)
+                ws_list = node_data.get("workspaces") or []
+                raw_id = name or p.name
+                slug_id = re.sub(r"[^a-z0-9]+", "-", raw_id.lower()).strip("-") or "workspace"
+                existing = next((item for item in ws_list if item.get("workspaceId") == slug_id), None)
+                if existing:
+                    existing["rootPath"] = str(p)
+                else:
+                    ws_list.append({
+                        "workspaceId": slug_id,
+                        "rootPath": str(p),
+                        "allowedHarnesses": ["shell", "claude", "codex"],
+                        "allowedModes": ["readOnly", "workspaceWrite"],
+                    })
+                node_data["workspaces"] = ws_list
+                with open(node_cfg, "w", encoding="utf-8") as f:
+                    json.dump(node_data, f, indent=2)
+            except Exception as ex:
+                logger.warning("Could not enroll workspace in node config: %s", ex)
+
     return j(handler, {"ok": True, "workspaces": wss})
 
 

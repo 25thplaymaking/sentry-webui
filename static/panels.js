@@ -6703,16 +6703,16 @@ function renderSentryWorkspacesPanel(){
   const panel=$('workspacesPanel');
   if(!panel)return;
   const add=$('panelWorkspaces')&&$('panelWorkspaces').querySelector('.panel-head-actions');
-  if(add)add.style.display='none';
+  if(add)add.style.display='';
   const sub=$('panelWorkspaces')&&$('panelWorkspaces').querySelector('.panel-head-sub');
   if(sub)sub.textContent='Allowlisted folders published by your linked workstation.';
   const workspaces=_sentryLinkedWorkspaces();
   panel.innerHTML='';
   if(!workspaces.length){
-    panel.innerHTML='<div class="panel-functional-empty"><strong>No linked workspaces</strong><span>Link the workstation node to make its allowlisted folders available to Codex Work.</span><button type="button" class="btn secondary" onclick="switchPanel(\'agentadmin\')">Open Agent</button></div>';
+    panel.innerHTML='<div class="panel-functional-empty"><strong>No linked workspaces</strong><span>Link the workstation node or add a local folder to make it available to Codex Work.</span><button type="button" class="btn primary" onclick="openWorkspaceCreate()" style="margin-top:8px">+ Add Space</button></div>';
     _clearWorkspaceDetail();
     const empty=$('workspaceDetailEmpty');
-    if(empty){empty.style.display='';const title=empty.querySelector('.main-view-empty-title');const subtext=empty.querySelector('.main-view-empty-sub');if(title)title.textContent='No linked workspace yet';if(subtext)subtext.textContent='Sentry never substitutes a folder inside the shared WebUI container.';}
+    if(empty){empty.style.display='';const title=empty.querySelector('.main-view-empty-title');const subtext=empty.querySelector('.main-view-empty-sub');if(title)title.textContent='No linked workspace yet';if(subtext)subtext.textContent='Pick a space from the sidebar or click + to add a folder from your workstation.';}
     return;
   }
   const current=String((S.session&&S.session.native_workspace_id)||S._pendingNativeWorkspaceId||'');
@@ -7051,7 +7051,13 @@ async function saveWorkspaceForm(){
       openWorkspaceDetail(targetPath);
       return;
     }
-    const data = await api('/api/workspaces/add', { method:'POST', body: JSON.stringify({ path }) });
+    const data = await api('/api/workspaces/add', { method:'POST', body: JSON.stringify({ path, name }) });
+    if (typeof _isSentryProductMode === 'function' && _isSentryProductMode()) {
+      if (typeof loadModels === 'function') await loadModels();
+      renderSentryWorkspacesPanel();
+      showToast(t('workspace_added') || 'Workspace added.');
+      return;
+    }
     _workspaceList = data.workspaces || [];
     _workspacePreFormDetail = null;
     // Apply rename if a friendly name was supplied

@@ -56,3 +56,12 @@ def test_ui_has_first_class_chat_work_switch_and_no_subscription_picker_duplicat
     assert 'body[data-sentry-experience="chat"] .rightpanel' in css
     assert "agentAdminUseProviderModel" not in admin
     assert "Choose in Chat or Work" in admin
+
+
+def test_session_update_persists_experience():
+    source = (ROOT / "api" / "routes.py").read_text(encoding="utf-8")
+    update_block = source[source.index("parsed.path == \"/api/session/update\":"):source.index("parsed.path == \"/api/session/worktree/remove\":")]
+    assert "if \"experience\" in body:" in update_block
+    assert "new_exp = _validate_session_experience(body.get(\"experience\"))" in update_block
+    assert "s.experience = new_exp" in update_block
+

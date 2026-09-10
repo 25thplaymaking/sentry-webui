@@ -11782,24 +11782,51 @@ function syncExperienceBar(){
   if(typeof syncNativeRuntimeBar==='function') syncNativeRuntimeBar();
   if(typeof window.syncSentryIntegrationSurface==='function') window.syncSentryIntegrationSurface();
 }
-async function selectExperience(value){
-  const next=_normalizeExperience(value);
-  const current=_currentExperience();
+async function selectExperience(value, options = {}){
+  const next = _normalizeExperience(value);
+  const current = _currentExperience();
   _setExperienceAccessOpen(false);
-  if(next===current) return;
+  if(next === current) return;
   if(S.busy){
-    if(typeof showToast==='function') showToast('Wait for the current response to finish before switching.',2500);
+    if(typeof showToast === 'function') showToast('Wait for the current response to finish before switching.', 2500);
     return;
   }
-  S._pendingExperience=next;
+  S._pendingExperience = next;
   syncExperienceBar();
   if(!S.session) return;
   try{
-    await newSession(true,{experience:next});
+    if(options && options.forceNewSession){
+      await newSession(true, {experience: next});
+    }else{
+      S.session.experience = next;
+      document.body.dataset.sentryExperience = next;
+      const data = await api('/api/session/update', {
+        method: 'POST',
+        body: JSON.stringify({
+          session_id: S.session.session_id,
+          experience: next,
+          workspace: S.session.workspace,
+          native_workspace_id: S.session.native_workspace_id || S._pendingNativeWorkspaceId || null,
+          native_runtime_options: S.session.native_runtime_options || S._pendingNativeRuntimeOptions || {},
+          sentry_target: S.session.sentry_target || S._pendingSentryTarget || {}
+        })
+      });
+      if(typeof _applySessionContextMetadataUpdate === 'function') _applySessionContextMetadataUpdate(data);
+      syncTopbar();
+      if(typeof syncExperienceBar === 'function') syncExperienceBar();
+      if(typeof syncNativeRuntimeBar === 'function') syncNativeRuntimeBar();
+      if(typeof window.syncSentryIntegrationSurface === 'function') window.syncSentryIntegrationSurface();
+      if(typeof renderSessionList === 'function') void renderSessionList();
+      if(!options.silent && typeof showToast === 'function'){
+        showToast(next === 'work' ? 'Switched session to Work mode.' : 'Switched session to Chat mode.', 2000);
+      }
+    }
   }catch(error){
-    S._pendingExperience=current;
+    S._pendingExperience = current;
+    if(S.session) S.session.experience = current;
+    document.body.dataset.sentryExperience = current;
     syncExperienceBar();
-    if(typeof showToast==='function') showToast('Could not switch modes. Try again.',2500,'error');
+    if(typeof showToast === 'function') showToast('Could not switch modes. Try again.', 2500, 'error');
     throw error;
   }
 }

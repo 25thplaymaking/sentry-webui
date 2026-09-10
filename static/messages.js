@@ -1347,6 +1347,44 @@ function _restoreComposerDraftAfterFailedSend(draftText, filesSnapshot, sid, cle
   return restoredVisible;
 }
 
+function _isSentryWorkIntent(text, target){
+  if(!text || typeof text !== 'string') return false;
+  const raw = text.trim();
+  const lower = raw.toLowerCase();
+
+  // Explicit work commands or prefixes
+  if(lower.startsWith('/work') || lower.startsWith('/diff') || lower.startsWith('/commit') || lower.startsWith('/run') || lower.startsWith('/terminal')) return true;
+  if(/\b(switch to work|start work|work on this|work on the)\b/i.test(lower)) return true;
+
+  // If a workstation workspace target is selected
+  const hasWorkspaceTarget = target && target.kind === 'workspace';
+  if(hasWorkspaceTarget){
+    if(/\b(build|compile|test|run|exec|execute|implement|refactor|fix|edit|modify|create|delete|patch|git|commit|push|pull|checkout|branch|diff|status|powershell|cmd|bash|terminal|install|npm|dotnet|pip|python)\b/i.test(lower)){
+      return true;
+    }
+  }
+
+  // File or repo modification intent
+  if(/\b(create file|edit file|modify file|delete file|update file|write code|fix bug|run test|run build)\b/i.test(lower)){
+    return true;
+  }
+
+  return false;
+}
+
+window.executeSwitchToWorkInline = async function(btn){
+  if(btn) btn.disabled = true;
+  if(typeof selectExperience === 'function'){
+    await selectExperience('work');
+  }
+  const input = $('msg');
+  if(input){
+    input.value = 'Proceed with the requested work in Work mode.';
+    if(typeof autoResize === 'function') autoResize();
+    if(typeof send === 'function') await send();
+  }
+};
+
 async function send(){
   // Static guards expect _defaultMessageMode to stay near send() while the actual
   // read remains in the S.busy branch below.
@@ -1767,6 +1805,17 @@ async function send(){
   let modelStateForPostStart;
   let explicitPickForPostStart;
   try{
+    if(typeof _currentExperience === 'function' && _currentExperience() === 'chat'){
+      const target = typeof selectedTarget === 'function' ? selectedTarget() : null;
+      if(typeof _isSentryWorkIntent === 'function' && _isSentryWorkIntent(msgText, target)){
+        try{
+          if(typeof selectExperience === 'function'){
+            await selectExperience('work', { silent: true });
+            if(typeof showToast === 'function') showToast('Switched session to Work mode to execute your request.', 2400);
+          }
+        }catch(_){ }
+      }
+    }
     const _modelState=_chatPayloadModelState();
     modelStateForPostStart=_modelState;
     const _pendingPick=(typeof _readPendingSessionModel==='function')

@@ -2324,17 +2324,11 @@ $('modelSelect').onchange=async()=>{
   }
   if(nativeRuntimeId && typeof _currentExperience==='function' && _currentExperience()!=='work'){
     S._pendingExperience='work';
+    if(S.session) S.session.experience='work';
+    document.body.dataset.sentryExperience='work';
     S._pendingNativeWorkspaceId=nativeWorkspaceId||null;
     if(typeof syncExperienceBar==='function') syncExperienceBar();
-    await newSession(true,{
-      experience:'work',
-      model:modelState.model,
-      model_provider:modelState.model_provider||null,
-      native_workspace_id:nativeWorkspaceId||null,
-      native_runtime_options:nativeRuntimeOptions||null,
-    });
-    if(typeof showToast==='function') showToast('Codex models open in Work with native features from your machine.',3200);
-    return;
+    if(typeof showToast==='function') showToast('Switched to Work mode for native Codex features.',2800);
   }
   if(typeof _rememberPendingSessionModel==='function') _rememberPendingSessionModel(S.session.session_id,modelState.model,modelState.model_provider);
   S.session.model=modelState.model;
@@ -2360,6 +2354,7 @@ $('modelSelect').onchange=async()=>{
   const data=await api('/api/session/update',{method:'POST',body:JSON.stringify({
     session_id:S.session.session_id,
     workspace:S.session.workspace,
+    experience:S.session.experience||(nativeRuntimeId?'work':undefined),
     model:modelState.model,
     model_provider:modelState.model_provider||null,
     native_workspace_id:nativeRuntimeId?(nativeWorkspaceId||null):(S.session.native_workspace_id||null),
