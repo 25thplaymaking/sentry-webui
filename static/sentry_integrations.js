@@ -334,6 +334,10 @@ async function selectSentryTarget(target,options={}){
   syncTargetChip();closeTargetMenu();
   try{
     if(typeof S!=='undefined'&&S.session){
+      if(target&&target.kind==='workspace'&&target.workspace_id){
+        S.session.native_workspace_id=target.workspace_id;
+        S._pendingNativeWorkspaceId=target.workspace_id;
+      }
       const data=await api('/api/session/update',{method:'POST',body:JSON.stringify({
         session_id:S.session.session_id,workspace:S.session.workspace,
         native_workspace_id:S.session.native_workspace_id||S._pendingNativeWorkspaceId||null,

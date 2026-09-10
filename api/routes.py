@@ -10658,8 +10658,22 @@ def _sentry_models_envelope(
             if not isinstance(raw_model, dict):
                 continue
             model_id = str(raw_model.get("id") or "").strip()
-            if not model_id or model_id not in advertised or model_id in claimed:
+            if not model_id:
                 continue
+            matched_id = None
+            if model_id in advertised:
+                matched_id = model_id
+            else:
+                for adv in advertised:
+                    if "/" in adv and adv.split("/", 1)[1] == model_id:
+                        matched_id = adv
+                        break
+                    if "/" in model_id and model_id.split("/", 1)[1] == adv:
+                        matched_id = adv
+                        break
+            if not matched_id or matched_id in claimed:
+                continue
+            model_id = matched_id
             model_entry = {
                 "id": model_id,
                 "label": str(raw_model.get("label") or model_id),

@@ -10193,6 +10193,10 @@ function _showAgentHealthAlert(payload){
   const banner=$('agentHealthBanner');
   const title=$('agentHealthTitle');
   const details=$('agentHealthDetails');
+  const restartBtn=$('btnRestartGateway');
+  if(restartBtn){
+    restartBtn.style.display = (document.body && document.body.dataset.sentryProduct === 'true') ? 'none' : '';
+  }
   if(!banner) return;
   if(title) title.textContent='Hermes agent is not responding';
   const state=payload&&payload.details&&payload.details.gateway_state?` State: ${payload.details.gateway_state}.`:'';
@@ -10205,6 +10209,10 @@ function dismissAgentHealthAlert(){
   _hideAgentHealthAlert();
 }
 async function restartGatewayService(){
+  if(document.body && document.body.dataset.sentryProduct === 'true'){
+    if(typeof showToast === 'function') showToast('Sentry agent runs as a managed server daemon. Check server service status if unreachable.', 4000);
+    return;
+  }
   const btn = $('btnRestartGateway');
   const dismissBtn = $('agentHealthDismiss');
   if(!btn) return;

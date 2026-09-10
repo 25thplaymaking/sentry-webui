@@ -3010,7 +3010,7 @@ let _kanbanRetired = false;
 function _configureSentryWorkBoard(){
   const panel=$('panelKanban');
   if(panel){
-    panel.querySelectorAll('#kanbanAssigneeFilter,#kanbanTenantFilter,.kanban-check,#kanbanBulkBar').forEach(el=>{el.style.display='none';});
+    panel.querySelectorAll('#kanbanAssigneeFilter,#kanbanTenantFilter,.kanban-check,#kanbanBulkBar,.kanban-new-task-row').forEach(el=>{el.style.display='none';});
     const title=panel.querySelector('.panel-head>span');
     if(title) title.textContent='Work board';
   }

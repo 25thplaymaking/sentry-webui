@@ -67,6 +67,25 @@ class TestEnvelopeShape:
         )
         assert all(group["group_id"] != "xai-oauth" for group in env["groups"])
 
+    def test_prefix_normalized_model_matching(self):
+        env = routes._sentry_models_envelope(
+            ["hosted/qwen-2.5-coder", "ollama/qwen3.6-35b"],
+            provider_groups=[
+                {
+                    "provider": "Nous Research",
+                    "provider_id": "nous",
+                    "models": [
+                        {"id": "qwen-2.5-coder", "label": "Qwen 2.5 Coder"},
+                        {"id": "ollama/qwen3.6-35b", "label": "Qwen 3.6 35B"},
+                    ],
+                }
+            ],
+        )
+        assert len(env["groups"]) == 1
+        group_models = [m["id"] for m in env["groups"][0]["models"]]
+        assert "hosted/qwen-2.5-coder" in group_models
+        assert "ollama/qwen3.6-35b" in group_models
+
     def test_native_codex_metadata_survives_the_webui_proxy(self):
         runtime = {
             "id": "codex",

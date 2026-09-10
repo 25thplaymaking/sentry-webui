@@ -65,3 +65,18 @@ def test_session_update_persists_experience():
     assert "new_exp = _validate_session_experience(body.get(\"experience\"))" in update_block
     assert "s.experience = new_exp" in update_block
 
+
+def test_ui_experience_switch_is_in_place_and_preserves_messages():
+    ui = (ROOT / "static" / "ui.js").read_text(encoding="utf-8")
+    fn = ui[ui.index("async function selectExperience("):ui.index("function _topbarLoadedMessageCount()")]
+    assert "await api('/api/session/update'" in fn
+    assert "S.session.experience = next" in fn
+    assert "options.forceNewSession" in fn
+
+
+def test_target_selection_binds_native_workspace():
+    integ = (ROOT / "static" / "sentry_integrations.js").read_text(encoding="utf-8")
+    fn = integ[integ.index("async function selectSentryTarget("):integ.index("function targetLabel(")]
+    assert "target.kind==='workspace'" in fn
+    assert "S.session.native_workspace_id=target.workspace_id" in fn
+
